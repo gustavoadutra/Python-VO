@@ -1,4 +1,5 @@
 import os
+import time
 
 import numpy as np
 import cv2
@@ -17,7 +18,9 @@ from VO.VisualOdometry import VisualOdometry, AbosluteScaleComputer
 def keypoints_plot(img, vo):
     if img.shape[2] == 1:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-    return plot_keypoints(img, vo.kptdescs["cur"]["keypoints"], vo.kptdescs["cur"]["scores"])
+    return plot_keypoints(
+        img, vo.kptdescs["cur"]["keypoints"], vo.kptdescs["cur"]["scores"]
+    )
 
 
 class TrajPlotter(object):
@@ -51,15 +54,16 @@ class TrajPlotter(object):
 
         # draw text
         text = "[AvgError] %2.4fm" % (avg_error)
-        cv2.putText(self.traj, text, (20, 40),
-                    cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1, 8)
+        cv2.putText(
+            self.traj, text, (20, 40), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1, 8
+        )
 
         return self.traj
 
 
 def run(args):
-    with open(args.config, 'r') as f:
-        config = yaml.load(f)
+    with open(args.config, "r") as f:
+        config = yaml.load(f, yaml.Loader)
 
     # create dataloader
     loader = create_dataloader(config["dataset"])
@@ -72,8 +76,8 @@ def run(args):
     traj_plotter = TrajPlotter()
 
     # log
-    fname = args.config.split('/')[-1].split('.')[0]
-    log_fopen = open("results/" + fname + ".txt", mode='a')
+    fname = args.config.split("/")[-1].split(".")[0]
+    log_fopen = open("results/" + fname + ".txt", mode="a")
 
     vo = VisualOdometry(detector, matcher, loader.cam)
     for i, img in enumerate(loader):
@@ -81,7 +85,16 @@ def run(args):
         R, t = vo.update(img, absscale.update(gt_pose))
 
         # === log writer ==============================
-        print(i, t[0, 0], t[1, 0], t[2, 0], gt_pose[0, 3], gt_pose[1, 3], gt_pose[2, 3], file=log_fopen)
+        print(
+            i,
+            t[0, 0],
+            t[1, 0],
+            t[2, 0],
+            gt_pose[0, 3],
+            gt_pose[1, 3],
+            gt_pose[2, 3],
+            file=log_fopen,
+        )
 
         # === drawer ==================================
         img1 = keypoints_plot(img, vo)
@@ -92,18 +105,27 @@ def run(args):
         if cv2.waitKey(10) == 27:
             break
 
-    cv2.imwrite("results/" + fname + '.png', img2)
+    cv2.imwrite("results/" + fname + ".png", img2)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='python_vo')
-    parser.add_argument('--config', type=str, default='params/kitti_superpoint_supergluematch.yaml',
-                        help='config file')
-    parser.add_argument('--logging', type=str, default='INFO',
-                        help='logging level: NOTSET, DEBUG, INFO, WARNING, ERROR, CRITICAL')
+    parser = argparse.ArgumentParser(description="python_vo")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="params/kitti_superpoint_supergluematch.yaml",
+        help="config file",
+    )
+    parser.add_argument(
+        "--logging",
+        type=str,
+        default="INFO",
+        help="logging level: NOTSET, DEBUG, INFO, WARNING, ERROR, CRITICAL",
+    )
 
     args = parser.parse_args()
 
     logging.basicConfig(level=logging._nameToLevel[args.logging])
 
     run(args)
+    time.sleep(30)
