@@ -105,6 +105,7 @@ def run(args):
         if cv2.waitKey(10) == 27:
             break
 
+        # print("results/" + fname + ".png", img2)
     cv2.imwrite("results/" + fname + ".png", img2)
 
 
@@ -128,4 +129,3 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging._nameToLevel[args.logging])
 
     run(args)
-    time.sleep(30)
