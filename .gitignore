@@ -1,7 +1,10 @@
 __pycache__
 *.pyc
 temp
+<<<<<<< HEAD
 results
 
 .vscode
 data
+=======
+>>>>>>> 95fc260 (Do not change the results)
