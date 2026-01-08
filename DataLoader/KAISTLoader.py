@@ -46,16 +46,18 @@ class ComplexUrbanDatasetLoader(object):
         # Assinatura estimada do PinholeCamera: (width, height, fx, fy, cx, cy)
         if PinholeCamera is not None:
             self.cam = PinholeCamera(
-                1280.0,  # Width
-                560.0,  # Height
-                847.416,  # fx
-                847.416,  # fy
-                635.556,  # cx
-                518.018,  # cy
+                width=1280,
+                height=560,
+                fx=816.9037899,
+                fy=811.5680383,
+                cx=608.5072628,
+                cy=263.4759976,
+                k1=-0.0561430,
+                k2=0.1395256,
+                p1=-0.0012156,
+                p2=-0.0009728,
+                k3=-0.0808782
             )
-
-        # Guardamos os intrínsecos raw também caso precise sem a classe utilitária
-        self.K = np.array([[847.416, 0, 635.556], [0, 847.416, 518.018], [0, 0, 1]])
 
         # ------------------------------------------------------------------
         # 2. Carregamento e Sincronização de Poses (Ground Truth)
@@ -85,7 +87,29 @@ class ComplexUrbanDatasetLoader(object):
                 # Col 13: Heading Valid, Col 14: Magnetic Heading
 
                 gps_data = gps_df.values
-                print(gps_df.values)
+                list_values = ["timestamp",
+                    "latitude",
+                    "longitude",
+                    "x_utm",
+                    "y_utm",
+                    "altitude",
+                    "fix_state",
+                    "num_satellites",
+                    "horizontal_precision",
+                    "lat_std",
+                    "lon_std",
+                    "alt_std",
+                    "heading_valid",
+                    "magnetic_heading",
+                    "speed_knot",
+                    "speed_km",
+                    "gnvtg_mode",
+                    "orthometric_altitude"]
+                values0 = gps_df.values
+
+                for c in range(18):
+                    print(list_values[c], values0[0][c])
+
                 gps_timestamps = gps_data[:, 0]
 
                 # Para cada imagem, encontrar o GPS mais próximo e montar a pose

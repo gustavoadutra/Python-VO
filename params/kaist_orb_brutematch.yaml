@@ -1,6 +1,6 @@
 dataset:
   name: ComplexUrbanDatasetLoader
-  root_path: /run/media/aki/OhShit/dataset_hdd/
+  root_path: /home/aki/Desktop/Datasets/urban27-dongtan/
   #root_path: test_imgs
   sequence: 'urban27'
   start: 0
