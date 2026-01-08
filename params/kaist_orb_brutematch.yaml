@@ -1,0 +1,27 @@
+dataset:
+  name: ComplexUrbanDatasetLoader
+  root_path: /run/media/aki/OhShit/dataset_hdd/
+  #root_path: test_imgs
+  sequence: 'urban27'
+  start: 0
+
+detector:
+  name: HandcraftDetector
+  type: ORB
+  ORB:
+    nfeatures: 1000
+    scaleFactor: 1.2
+    nLevels: 8
+    edgeThreshold: 31
+    firstLevel: 0
+    WTA_K: 2
+    patchSize: 31
+    fastThreshold: 2
+
+matcher:
+  name: FrameByFrameMatcher
+  type: KNN
+  KNN:
+    HAMMING: True  # For ORB Binary descriptor, only can use hamming matching
+    first_N: 300 # For hamming matching, use first N min matches
+  distance_ratio: 0.75
