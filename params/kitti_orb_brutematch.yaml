@@ -1,6 +1,6 @@
 dataset:
   name: KITTILoader
-  root_path: /run/media/aki/OhShit/dataset_hdd/KITTI/odometry
+  root_path: /home/aki/Desktop/Python-VO/test_imgs/
   #root_path: test_imgs
   sequence: '00'
   start: 0

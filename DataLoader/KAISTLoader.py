@@ -60,11 +60,8 @@ class ComplexUrbanDatasetLoader(object):
 
         # Default values for urban27
         gps_data = gps_df.values
-        print(gps_data)
 
         gps_timestamps = gps_data[:, 0]
-
-        print(gps_timestamps)
 
         # For each image get pose based in the timestamp
         for ts in self.timestamps:
@@ -74,15 +71,14 @@ class ComplexUrbanDatasetLoader(object):
 
             # Build 4x4 pose matrix
             pose = np.eye(4)
-            pose[0, 3] = row[3]  # x_utm
-            pose[1, 3] = row[4]  # y_utm
-            pose[2, 3] = row[5]  # altitude
+
+            pose[0, 3] = row[3]  # UTM X -> Camera X (Right)
+            pose[1, 3] = -row[5]  # Altitude -> Camera Y (Down) - Note the negative sign
+            pose[2, 3] = row[4]  # UTM Y -> Camera Z (Forward)
 
             # Rotação = Heading
             # Verifica heading_valid (coluna 13)
             if row[12] == 1:
-                print(row[12])
-                print(row[13])
                 heading = np.radians(row[13])
                 cos_h = np.cos(heading)
                 sin_h = np.sin(heading)
@@ -91,9 +87,25 @@ class ComplexUrbanDatasetLoader(object):
                     [[cos_h, -sin_h, 0], [sin_h, cos_h, 0], [0, 0, 1]]
                 )
 
-            self.gt_poses.append(pose)
+            self.gt_poses.append(pose[:4, :4])
 
-        self.img_id = self.config["start"]
+        all_poses = np.array(self.gt_poses)
+
+        if len(all_poses) > 0:
+            # 2. Get the very first pose as the 'Origin'
+            first_pose = all_poses[0]
+            first_pose_inv = np.linalg.inv(first_pose)
+
+            self.gt_poses = []
+            for i in range(len(all_poses)):
+                # 3. Calculate relative movement from start
+                rel_pose = first_pose_inv @ all_poses[i]
+
+                # 4. Convert to KITTI format: Keep only 3 rows and 4 columns
+                # KITTI uses 3x4: [R | t]
+                self.gt_poses.append(rel_pose[:3, :4])
+
+                self.img_id = self.config["start"]
 
         search_path = str(self.img_folder / "*.png")
         self.img_files = sorted(glob.glob(search_path))
@@ -101,20 +113,10 @@ class ComplexUrbanDatasetLoader(object):
 
     def get_cur_pose(self):
         """Retorna a pose relativa ao primeiro frame no formato KITTI (3x4)"""
-        # print(self.gt_poses[0])
         if 0 <= self.img_id - 1 < len(self.gt_poses):
-            # 1. Obter a pose global atual e a pose do primeiro frame
-            current_pose_full = self.gt_poses[self.img_id - 1]
-            first_pose_full = self.gt_poses[0]
+            return self.gt_poses[self.img_id - 1] - self.gt_poses[0]
 
-            # 2. Calcular a pose relativa: T_rel = (T_first^-1) * T_current
-            # Isso faz com que o frame 0 seja (0,0,0) com rotação zero
-            relative_pose = np.linalg.inv(first_pose_full) @ current_pose_full
-
-            # 3. Retornar apenas as primeiras 3 linhas (formato 3x4 do KITTI)
-            return relative_pose[:3, :]
-
-        return np.eye(4)[:3, :]  # Fallback
+        return np.eye(4)[:3, :]  # Fallbak
 
     def __getitem__(self, item):
         """Acesso aleatório por índice (similar ao KITTI Loader)"""

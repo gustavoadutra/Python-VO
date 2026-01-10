@@ -44,7 +44,7 @@ class TrajPlotter(object):
 
         # === drawer ==================================
 
-        scale = 0.5
+        scale = 0.1
 
         # Offset: Centers the start point.
         offset_x = self.w // 2
