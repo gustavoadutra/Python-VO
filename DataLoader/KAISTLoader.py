@@ -4,8 +4,6 @@ import glob
 import logging
 import pandas as pd
 from pathlib import Path
-from pandas._libs.tslibs import timestamps
-from tqdm import tqdm
 
 from utils.PinholeCamera import PinholeCamera
 
@@ -31,22 +29,64 @@ class ComplexUrbanDatasetLoader(object):
             self.img_folder = self.sequence_path / "stereo_left"
         else:
             self.img_folder = self.sequence_path / "stereo_right"
+
         # Hardcoded for urban27
+
+        # Raw Intrinsics (Input)
+        # Camera matrix
+        self.K_raw = np.array(
+            [
+                [816.9037899, 0.505101667, 608.5072628],
+                [0.0, 811.5680383, 263.4759976],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        # Distortion Coefficients
+        self.D = np.array([-0.056143, 0.139526, -0.001216, -0.000973, -0.080878])
+        # Rectification Matrix
+        self.R = np.array(
+            [
+                [0.999969, 0.000362, -0.007812],
+                [-0.000344, 0.999997, 0.002300],
+                [0.007813, -0.002298, 0.999967],
+            ]
+        )
+        # Projection Matrix (Output - This is what your VO will use)
+        self.P = np.array(
+            [
+                [775.372356, 0.0, 619.473091, 0.0],
+                [0.0, 775.372356, 257.180490, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+            ]
+        )
+
+        # 3. Pre-compute the Undistortion/Rectification Maps
+        # This is the "Blueprint" for fixing the images. We calculate it ONCE.
+        self.map1, self.map2 = cv2.initUndistortRectifyMap(
+            self.K_raw,
+            self.D,
+            self.R,
+            self.P[:3, :3],  # We only need the 3x3 part of P
+            (1280, 560),  # Image Size
+            cv2.CV_32FC1,
+        )
+
+        # 4. Initialize Camera Object for the VO
+        # Note: We use the values from P (Projected), NOT K_raw!
         if PinholeCamera is not None:
             self.cam = PinholeCamera(
                 width=1280,
                 height=560,
-                fx=816.9037899,
-                fy=811.5680383,
-                cx=608.5072628,
-                cy=263.4759976,
-                k1=-0.0561430,
-                k2=0.1395256,
-                p1=-0.0012156,
-                p2=-0.0009728,
-                k3=-0.0808782,
+                fx=self.P[0, 0],  # 775.37...
+                fy=self.P[1, 1],  # 775.37...
+                cx=self.P[0, 2],  # 619.47...
+                cy=self.P[1, 2],  # 257.18...
+                k1=0,
+                k2=0,
+                p1=0,
+                p2=0,
+                k3=0,  # Distortion is now 0!
             )
-
         # Ground truth
         self.gt_poses = []
 
@@ -114,19 +154,21 @@ class ComplexUrbanDatasetLoader(object):
     def get_cur_pose(self):
         """Retorna a pose relativa ao primeiro frame no formato KITTI (3x4)"""
         if 0 <= self.img_id - 1 < len(self.gt_poses):
-            return self.gt_poses[self.img_id - 1] - self.gt_poses[0]
+            return self.gt_poses[self.img_id - 1]
 
         return np.eye(4)[:3, :]  # Fallbak
 
     def __getitem__(self, item):
-        """Acesso aleatório por índice (similar ao KITTI Loader)"""
         if item >= len(self.img_files):
             raise IndexError("Index out of bounds")
 
         file_name = self.img_files[item]
+
         img = cv2.imread(file_name)  # Retorna BGR
         # Se precisar de grayscale explicitamente:
         # img = cv2.imread(file_name, cv2.IMREAD_GRAYSCALE)
+        # img_rectified = cv2.remap(img, self.map1, self.map2, cv2.INTER_LINEAR)
+
         return img
 
     def __iter__(self):
@@ -138,6 +180,9 @@ class ComplexUrbanDatasetLoader(object):
         if self.img_id < self.img_N:
             file_name = self.img_files[self.img_id]
             img = cv2.imread(file_name)
+
+            # This makes the image match the Projection Matrix
+            # img_rectified = cv2.remap(img, self.map1, self.map2, cv2.INTER_LINEAR)
 
             self.img_id += 1
             return img
