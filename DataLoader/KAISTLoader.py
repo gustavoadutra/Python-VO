@@ -33,7 +33,7 @@ class ComplexUrbanDatasetLoader(object):
         # Hardcoded for urban27
 
         # Raw Intrinsics (Input)
-        # Camera matrix
+        # Camera matrix without transformations
         self.K_raw = np.array(
             [
                 [816.9037899, 0.505101667, 608.5072628],
@@ -68,7 +68,7 @@ class ComplexUrbanDatasetLoader(object):
             self.R,
             self.P[:3, :3],  # We only need the 3x3 part of P
             (1280, 560),  # Image Size
-            cv2.CV_32FC1,
+            cv2.CV_32F,
         )
 
         # 4. Initialize Camera Object for the VO
@@ -97,38 +97,57 @@ class ComplexUrbanDatasetLoader(object):
         # Load vrs gps file
         vrs_gps_path = self.sequence_path / "sensor_data/vrs_gps.csv"
         gps_df = pd.read_csv(vrs_gps_path, header=None)
-
-        # Default values for urban27
+        gps_df = gps_df.apply(pd.to_numeric, errors="coerce")
         gps_data = gps_df.values
 
-        gps_timestamps = gps_data[:, 0]
+        # Extrair dados brutos do GPS
+        gps_ts_raw = gps_data[:, 0]  # Timestamps do GPS
+        gps_x_raw = gps_data[:, 3]  # UTM X
+        gps_y_raw = gps_data[:, 4]  # UTM Y
+        gps_z_raw = gps_data[:, 5]  # Altitude
 
-        # For each image get pose based in the timestamp
-        for ts in self.timestamps:
-            # Encontrar índice do timestamp mais próximo
-            idx = np.argmin(np.abs(gps_timestamps - ts))
-            row = gps_data[idx]
+        # Timestamps das Imagens (já carregados anteriormente)
+        cam_ts = self.timestamps
 
-            # Build 4x4 pose matrix
+        # --- CORREÇÃO: INTERPOLAÇÃO ---
+        # Cria posições virtuais de GPS sincronizadas com cada frame da câmera
+        interp_x = np.interp(cam_ts, gps_ts_raw, gps_x_raw)
+        interp_y = np.interp(cam_ts, gps_ts_raw, gps_y_raw)
+        interp_z = np.interp(cam_ts, gps_ts_raw, gps_z_raw)
+
+        self.gt_poses = []
+
+        # Agora iteramos pelos índices, pois já temos os dados sincronizados
+        for i in range(len(cam_ts)):
             pose = np.eye(4)
 
-            pose[0, 3] = row[3]  # UTM X -> Camera X (Right)
-            pose[1, 3] = -row[5]  # Altitude -> Camera Y (Down) - Note the negative sign
-            pose[2, 3] = row[4]  # UTM Y -> Camera Z (Forward)
+            # Usamos os valores interpolados
+            # Nota: Mantive a conversão de eixos que você usava (X->X, Z->Y, Y->Z)
+            # Confirme se para o KAIST isso ainda faz sentido visualmente
+            pose[0, 3] = interp_x[i]  # Câmera X
+            pose[1, 3] = -interp_z[i]  # Câmera Y (Altitude invertida)
+            pose[2, 3] = interp_y[i]  # Câmera Z (Frente)
 
-            # Rotação = Heading
-            # Verifica heading_valid (coluna 13)
-            if row[12] == 1:
-                heading = np.radians(row[13])
+            # --- TRATAMENTO DE ROTAÇÃO (HEADING) ---
+            # Rotação é mais chato interpolar linearmente por causa do salto 360->0
+            # Vamos pegar o mais próximo APENAS para a rotação, ou interpolar com cuidado
+            # Para simplificar, vou usar o 'nearest' para rotação, mas o 'interp' para posição
+            idx_nearest = np.argmin(np.abs(gps_ts_raw - cam_ts[i]))
+            row_raw = gps_data[idx_nearest]
+
+            if row_raw[12] == 1:  # heading_valid
+                heading = np.radians(row_raw[13])
                 cos_h = np.cos(heading)
                 sin_h = np.sin(heading)
 
+                # Ajuste a matriz de rotação conforme a orientação do seu VO
                 pose[:3, :3] = np.array(
                     [[cos_h, -sin_h, 0], [sin_h, cos_h, 0], [0, 0, 1]]
                 )
 
-            self.gt_poses.append(pose[:4, :4])
+            self.gt_poses.append(pose)
 
+        print(self.gt_poses)
         all_poses = np.array(self.gt_poses)
 
         if len(all_poses) > 0:
@@ -161,7 +180,6 @@ class ComplexUrbanDatasetLoader(object):
     def __getitem__(self, item):
         if item >= len(self.img_files):
             raise IndexError("Index out of bounds")
-
         file_name = self.img_files[item]
 
         img = cv2.imread(file_name)  # Retorna BGR
@@ -182,10 +200,9 @@ class ComplexUrbanDatasetLoader(object):
             img = cv2.imread(file_name)
 
             # This makes the image match the Projection Matrix
-            # img_rectified = cv2.remap(img, self.map1, self.map2, cv2.INTER_LINEAR)
-
+            img_rectified = cv2.remap(img, self.map1, self.map2, cv2.INTER_LINEAR)
             self.img_id += 1
-            return img
+            return img_rectified
 
         raise StopIteration()
 

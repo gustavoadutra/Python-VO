@@ -53,8 +53,6 @@ class VisualOdometry(object):
         else:
             # update keypoints and descriptors
             self.kptdescs["cur"] = kptdesc
-
-            # match keypoints
             matches = self.matcher(self.kptdescs)
 
             # compute relative R,t between ref and cur frame
@@ -108,6 +106,7 @@ class AbosluteScaleComputer(object):
 
         self.count += 1
         self.prev_pose = self.cur_pose
+        print(scale)
         return scale
 
 
