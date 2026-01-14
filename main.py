@@ -27,7 +27,7 @@ class TrajPlotter(object):
     def __init__(self):
         self.errors = []
         # 1. Increase canvas size (e.g., from 600 to 1000 or 1200)
-        self.w, self.h = 1000, 1000
+        self.w, self.h = 800, 800
         self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
         pass
 

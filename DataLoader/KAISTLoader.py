@@ -1,14 +1,39 @@
 import cv2
 import numpy as np
-import glob
 import logging
 import pandas as pd
 from pathlib import Path
+from typing import Optional, Dict, Iterator
 
-from utils.PinholeCamera import PinholeCamera
+# Assuming utils.PinholeCamera exists in your project structure
+try:
+    from utils.PinholeCamera import PinholeCamera
+except ImportError:
+    PinholeCamera = None
+    logging.warning(
+        "PinholeCamera module not found. Camera object will not be initialized."
+    )
 
 
-class ComplexUrbanDatasetLoader(object):
+class ComplexUrbanDatasetLoader:
+    """
+    DataLoader for the Complex Urban Dataset.
+
+    This class handles:
+    1. Loading stereo images based on a CSV timestamp file.
+    2. Rectifying images using hardcoded camera calibration matrices.
+    3. Loading GPS/IMU data and synchronizing it with images.
+    4. generating Ground Truth poses in KITTI format (3x4 transformation matrix).
+
+    Attributes:
+        config (dict): Configuration dictionary.
+        dataset_path (Path): Path to the dataset root.
+        sequence_path (Path): Path to the specific sequence.
+        img_folder (Path): Path to the image directory (stereo_left or right).
+        timestamps (np.ndarray): Array of timestamps for synchronization.
+        gt_poses (list): List of 3x4 ground truth pose matrices (KITTI format).
+    """
+
     default_config = {
         "root_path": "/run/media/aki/OhShit/dataset_hdd/urban27",
         "sequence": "urban27",
@@ -16,195 +41,269 @@ class ComplexUrbanDatasetLoader(object):
         "camera": "stereo_left",
     }
 
-    def __init__(self, config={}):
-        self.config = self.default_config
-        self.config = {**self.config, **config}
-        logging.info("Complex Urban Dataset config: ")
-        logging.info(self.config)
+    def __init__(self, config: Dict = {}):
+        """
+        Initialize the dataset loader.
 
+        Args:
+            config (dict): dictionary to override default configuration.
+                           Keys: 'root_path', 'sequence', 'start', 'camera'.
+        """
+        self.config = {**self.default_config, **config}
+
+        logging.basicConfig(level=logging.INFO)
+        logging.info(f"Initializing Complex Urban Dataset with config: {self.config}")
+
+        self._setup_paths()
+        self._init_calibration()
+        self._load_data()
+
+        # Iteration state
+        self.img_id = self.config["start"]
+        self.img_N = len(self.img_files)
+
+    def _setup_paths(self):
+        """Sets up file paths based on configuration."""
         self.dataset_path = Path(self.config["root_path"])
         self.sequence_path = self.dataset_path / self.config["sequence"]
 
-        if self.config["camera"] == "stereo_left":
-            self.img_folder = self.sequence_path / "stereo_left"
-        else:
-            self.img_folder = self.sequence_path / "stereo_right"
+        target_cam = self.config["camera"]
+        if target_cam not in ["stereo_left", "stereo_right"]:
+            raise ValueError(f"Invalid camera selection: {target_cam}")
 
-        # Hardcoded for urban27
+        self.img_folder = self.sequence_path / target_cam
 
-        # Raw Intrinsics (Input)
-        # Camera matrix without transformations
-        self.K_raw = np.array(
-            [
-                [816.9037899, 0.505101667, 608.5072628],
-                [0.0, 811.5680383, 263.4759976],
-                [0.0, 0.0, 1.0],
-            ]
-        )
-        # Distortion Coefficients
-        self.D = np.array([-0.056143, 0.139526, -0.001216, -0.000973, -0.080878])
-        # Rectification Matrix
-        self.R = np.array(
-            [
-                [0.999969, 0.000362, -0.007812],
-                [-0.000344, 0.999997, 0.002300],
-                [0.007813, -0.002298, 0.999967],
-            ]
-        )
-        # Projection Matrix (Output - This is what your VO will use)
-        self.P = np.array(
-            [
-                [775.372356, 0.0, 619.473091, 0.0],
-                [0.0, 775.372356, 257.180490, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-            ]
-        )
+    def _init_calibration(self):
+        """
+        Loads Intrinsic (K), Distortion (D), Rectification (R),
+        and Projection (P) matrices from 'calibration/left.yaml'.
+        Initializes the OpenCV undistort/rectify maps.
+        """
+        # Construct the path to the calibration file
+        # Assumes folder structure: .../urban27/calibration/left.yaml
+        calib_file = self.sequence_path / "calibration" / "left.yaml"
 
-        # 3. Pre-compute the Undistortion/Rectification Maps
-        # This is the "Blueprint" for fixing the images. We calculate it ONCE.
+        if not calib_file.exists():
+            raise FileNotFoundError(f"Calibration file not found at: {calib_file}")
+
+        logging.info(f"Loading calibration from: {calib_file}")
+
+        # Open the file using OpenCV's FileStorage
+        # Note: str(calib_file) is required because cv2 < 4.5 might not accept Path objects
+        fs = cv2.FileStorage(str(calib_file), cv2.FILE_STORAGE_READ)
+
+        if not fs.isOpened():
+            raise ValueError(f"Could not open calibration file: {calib_file}")
+
+        # Extract matrices using .mat() to get numpy arrays
+        self.K_raw = fs.getNode("camera_matrix").mat()
+        self.D = fs.getNode("distortion_coefficients").mat()
+        self.R = fs.getNode("rectification_matrix").mat()
+        self.P = fs.getNode("projection_matrix").mat()
+
+        fs.release()
+
+        # Pre-compute the rectification maps
+        # Note: P[:3, :3] extracts the 3x3 subset of the 3x4 projection matrix
         self.map1, self.map2 = cv2.initUndistortRectifyMap(
-            self.K_raw,
-            self.D,
-            self.R,
-            self.P[:3, :3],  # We only need the 3x3 part of P
-            (1280, 560),  # Image Size
-            cv2.CV_32F,
+            self.K_raw, self.D, self.R, self.P[:3, :3], (1280, 560), cv2.CV_32F
         )
 
-        # 4. Initialize Camera Object for the VO
-        # Note: We use the values from P (Projected), NOT K_raw!
         if PinholeCamera is not None:
             self.cam = PinholeCamera(
                 width=1280,
                 height=560,
-                fx=self.P[0, 0],  # 775.37...
-                fy=self.P[1, 1],  # 775.37...
-                cx=self.P[0, 2],  # 619.47...
-                cy=self.P[1, 2],  # 257.18...
-                k1=0,
-                k2=0,
-                p1=0,
-                p2=0,
-                k3=0,  # Distortion is now 0!
+                fx=self.P[0, 0],
+                fy=self.P[1, 1],
+                cx=self.P[0, 2],
+                cy=self.P[1, 2],
             )
-        # Ground truth
-        self.gt_poses = []
 
-        # Load timestamps file
-        img_files = sorted(list(self.img_folder.glob("*.png")))
-        self.timestamps = np.array([int(p.stem) for p in img_files])
+    def _load_data(self):
+        """
+        Loads the image list from CSV and synchronizes GPS data to generate
+        ground truth poses.
+        """
+        # --- Load Image Timestamps from CSV ---
+        stamp_file_path = self.sequence_path / "sensor_data/stereo_stamp.csv"
 
-        # Load vrs gps file
+        if not stamp_file_path.exists():
+            raise FileNotFoundError(f"Timestamp file not found: {stamp_file_path}")
+
+        # Load timestamps, forcing numeric and dropping bad rows
+        df_stamps = pd.read_csv(stamp_file_path, header=None)
+        self.timestamps = (
+            pd.to_numeric(df_stamps.iloc[:, 0], errors="coerce")
+            .dropna()
+            .values.astype(np.int64)
+        )
+
+        self.img_files = []
+        for ts in self.timestamps:
+            img_p = self.img_folder / f"{ts}.png"
+            self.img_files.append(str(img_p))
+
+        logging.info(f"Loaded {len(self.img_files)} image entries from CSV.")
+
+        # --- Load GPS Data for Ground Truth ---
         vrs_gps_path = self.sequence_path / "sensor_data/vrs_gps.csv"
+        if not vrs_gps_path.exists():
+            logging.error("GPS file not found. GT poses will be empty.")
+            self.gt_poses = []
+            return
+
+        # Read CSV without header first
         gps_df = pd.read_csv(vrs_gps_path, header=None)
-        gps_df = gps_df.apply(pd.to_numeric, errors="coerce")
+
+        # Define the columns we strictly need:
+        # 0: Timestamp, 3: X, 4: Y, 5: Z, 12: Heading Valid, 13: Heading
+        needed_cols = [0, 3, 4, 5, 12, 13]
+
+        # Convert ONLY these columns to numeric.
+        # Any non-numeric value (like a header string) becomes NaN in that cell.
+        for col in needed_cols:
+            gps_df[col] = pd.to_numeric(gps_df[col], errors="coerce")
+
+        # Drop rows ONLY if our critical columns have NaNs.
+        # This ignores garbage in other unused columns.
+        gps_df = gps_df.dropna(subset=needed_cols)
+
+        # Convert to numpy array
         gps_data = gps_df.values
 
-        # Extrair dados brutos do GPS
-        gps_ts_raw = gps_data[:, 0]  # Timestamps do GPS
-        gps_x_raw = gps_data[:, 3]  # UTM X
-        gps_y_raw = gps_data[:, 4]  # UTM Y
-        gps_z_raw = gps_data[:, 5]  # Altitude
+        # Now extraction is safe
+        gps_ts_raw = gps_data[:, 0].astype(np.float64)
+        gps_x_raw = gps_data[:, 3].astype(np.float64)
+        gps_y_raw = gps_data[:, 4].astype(np.float64)
+        gps_z_raw = gps_data[:, 5].astype(np.float64)
 
-        # Timestamps das Imagens (já carregados anteriormente)
-        cam_ts = self.timestamps
+        if len(gps_ts_raw) == 0:
+            raise ValueError(f"GPS data is empty after filtering! Check {vrs_gps_path}")
 
-        # --- CORREÇÃO: INTERPOLAÇÃO ---
-        # Cria posições virtuais de GPS sincronizadas com cada frame da câmera
-        interp_x = np.interp(cam_ts, gps_ts_raw, gps_x_raw)
-        interp_y = np.interp(cam_ts, gps_ts_raw, gps_y_raw)
-        interp_z = np.interp(cam_ts, gps_ts_raw, gps_z_raw)
+        # --- Synchronize GPS to Camera Frames via Interpolation ---
+        target_ts = self.timestamps.astype(np.float64)
 
-        self.gt_poses = []
+        # interp requires the x-coordinates (gps_ts_raw) to be increasing.
+        # Usually they are, but sorting ensures safety.
+        sort_idx = np.argsort(gps_ts_raw)
+        gps_ts_raw = gps_ts_raw[sort_idx]
+        gps_x_raw = gps_x_raw[sort_idx]
+        gps_y_raw = gps_y_raw[sort_idx]
+        gps_z_raw = gps_z_raw[sort_idx]
+        # Note: We can't easily sort gps_data for the loop later if we split arrays here,
+        # but for simple position interpolation this is fine.
+        # For heading (row lookup), we need to reference the sorted data.
+        gps_data = gps_data[sort_idx]
 
-        # Agora iteramos pelos índices, pois já temos os dados sincronizados
-        for i in range(len(cam_ts)):
+        interp_x = np.interp(target_ts, gps_ts_raw, gps_x_raw)
+        interp_y = np.interp(target_ts, gps_ts_raw, gps_y_raw)
+        interp_z = np.interp(target_ts, gps_ts_raw, gps_z_raw)
+
+        raw_poses = []
+
+        for i in range(len(self.timestamps)):
             pose = np.eye(4)
 
-            # Usamos os valores interpolados
-            # Nota: Mantive a conversão de eixos que você usava (X->X, Z->Y, Y->Z)
-            # Confirme se para o KAIST isso ainda faz sentido visualmente
-            pose[0, 3] = interp_x[i]  # Câmera X
-            pose[1, 3] = -interp_z[i]  # Câmera Y (Altitude invertida)
-            pose[2, 3] = interp_y[i]  # Câmera Z (Frente)
+            # Coordinate transformation
+            pose[0, 3] = interp_x[i]  # Camera X
+            pose[1, 3] = -interp_z[i]  # Camera Y (Altitude inverted)
+            pose[2, 3] = interp_y[i]  # Camera Z (Forward)
 
-            # --- TRATAMENTO DE ROTAÇÃO (HEADING) ---
-            # Rotação é mais chato interpolar linearmente por causa do salto 360->0
-            # Vamos pegar o mais próximo APENAS para a rotação, ou interpolar com cuidado
-            # Para simplificar, vou usar o 'nearest' para rotação, mas o 'interp' para posição
-            idx_nearest = np.argmin(np.abs(gps_ts_raw - cam_ts[i]))
+            # Get nearest heading from the *sorted* data
+            # np.searchsorted is faster, but your logic uses nearest, so argmin is fine for small datasets
+            idx_nearest = np.argmin(np.abs(gps_ts_raw - target_ts[i]))
             row_raw = gps_data[idx_nearest]
 
-            if row_raw[12] == 1:  # heading_valid
+            # Column 12: Heading Valid, Column 13: Heading Degrees
+            if row_raw[12] == 1:
                 heading = np.radians(row_raw[13])
                 cos_h = np.cos(heading)
                 sin_h = np.sin(heading)
 
-                # Ajuste a matriz de rotação conforme a orientação do seu VO
                 pose[:3, :3] = np.array(
                     [[cos_h, -sin_h, 0], [sin_h, cos_h, 0], [0, 0, 1]]
                 )
 
-            self.gt_poses.append(pose)
+            raw_poses.append(pose)
 
-        print(self.gt_poses)
-        all_poses = np.array(self.gt_poses)
-
-        if len(all_poses) > 0:
-            # 2. Get the very first pose as the 'Origin'
-            first_pose = all_poses[0]
+        # --- Normalize Poses ---
+        self.gt_poses = []
+        if len(raw_poses) > 0:
+            first_pose = raw_poses[0]
             first_pose_inv = np.linalg.inv(first_pose)
 
-            self.gt_poses = []
-            for i in range(len(all_poses)):
-                # 3. Calculate relative movement from start
-                rel_pose = first_pose_inv @ all_poses[i]
-
-                # 4. Convert to KITTI format: Keep only 3 rows and 4 columns
-                # KITTI uses 3x4: [R | t]
+            for p in raw_poses:
+                rel_pose = first_pose_inv @ p
                 self.gt_poses.append(rel_pose[:3, :4])
 
-                self.img_id = self.config["start"]
+    def get_cur_pose(self) -> np.ndarray:
+        """
+        Returns the ground truth pose for the current frame index.
 
-        search_path = str(self.img_folder / "*.png")
-        self.img_files = sorted(glob.glob(search_path))
-        self.img_N = len(self.img_files)
+        Returns:
+            np.ndarray: 3x4 Transformation Matrix (KITTI format).
+                        Returns Identity if index is out of bounds.
+        """
+        # img_id has already been incremented by __next__, so we look at img_id - 1
+        idx = self.img_id - 1
+        if 0 <= idx < len(self.gt_poses):
+            return self.gt_poses[idx]
+        return np.eye(4)[:3, :]
 
-    def get_cur_pose(self):
-        """Retorna a pose relativa ao primeiro frame no formato KITTI (3x4)"""
-        if 0 <= self.img_id - 1 < len(self.gt_poses):
-            return self.gt_poses[self.img_id - 1]
+    def __len__(self) -> int:
+        """Returns the number of images remaining in the sequence from the start index."""
+        return self.img_N - self.config["start"]
 
-        return np.eye(4)[:3, :]  # Fallbak
-
-    def __getitem__(self, item):
-        if item >= len(self.img_files):
-            raise IndexError("Index out of bounds")
-        file_name = self.img_files[item]
-
-        img = cv2.imread(file_name)  # Retorna BGR
-        # Se precisar de grayscale explicitamente:
-        # img = cv2.imread(file_name, cv2.IMREAD_GRAYSCALE)
-        # img_rectified = cv2.remap(img, self.map1, self.map2, cv2.INTER_LINEAR)
-
-        return img
-
-    def __iter__(self):
-        """Reseta o iterador"""
+    def __iter__(self) -> Iterator:
+        """Resets the iterator."""
         return self
 
-    def __next__(self):
-        """Lógica de iteração principal"""
-        if self.img_id < self.img_N:
-            file_name = self.img_files[self.img_id]
-            img = cv2.imread(file_name)
+    def __next__(self) -> np.ndarray:
+        """
+        Iterates to the next image in the sequence.
 
-            # This makes the image match the Projection Matrix
+        Returns:
+            np.ndarray: Rectified image (BGR).
+
+        Raises:
+            StopIteration: When sequence ends.
+        """
+        if self.img_id < self.img_N:
+            file_path = self.img_files[self.img_id]
+
+            # Use Path object to check existence before reading
+            if not Path(file_path).exists():
+                logging.warning(f"Image file missing: {file_path}")
+                # Create a black dummy image or skip?
+                # Choosing to return black image to maintain synchronization with poses
+                img = np.zeros((560, 1280, 3), dtype=np.uint8)
+            else:
+                img = cv2.imread(file_path)
+                if img is None:
+                    logging.warning(f"Failed to decode image: {file_path}")
+                    img = np.zeros((560, 1280, 3), dtype=np.uint8)
+
+            # Rectify the image
             img_rectified = cv2.remap(img, self.map1, self.map2, cv2.INTER_LINEAR)
+
             self.img_id += 1
             return img_rectified
 
         raise StopIteration()
 
-    def __len__(self):
-        return self.img_N - self.config["start"]
+    def __getitem__(self, index: int) -> np.ndarray:
+        """
+        Allows random access to images by index.
+
+        Args:
+            index (int): Index of the image to retrieve.
+
+        Returns:
+            np.ndarray: Original Image (Non-rectified) BGR.
+        """
+        if index >= len(self.img_files):
+            raise IndexError("Index out of bounds")
+
+        file_path = self.img_files[index]
+        img = cv2.imread(file_path)
+        return img
