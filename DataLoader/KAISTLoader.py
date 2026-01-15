@@ -124,7 +124,7 @@ class ComplexUrbanDatasetLoader:
         Loads the image list from CSV and synchronizes GPS data to generate
         ground truth poses.
         """
-        # --- Load Image Timestamps from CSV ---
+        # Load Image Timestamps from CSV
         stamp_file_path = self.sequence_path / "sensor_data/stereo_stamp.csv"
 
         if not stamp_file_path.exists():
@@ -132,11 +132,7 @@ class ComplexUrbanDatasetLoader:
 
         # Load timestamps, forcing numeric and dropping bad rows
         df_stamps = pd.read_csv(stamp_file_path, header=None)
-        self.timestamps = (
-            pd.to_numeric(df_stamps.iloc[:, 0], errors="coerce")
-            .dropna()
-            .values.astype(np.int64)
-        )
+        self.timestamps = pd.to_numeric(df_stamps.iloc[:, 0]).values.astype(np.int64)
 
         self.img_files = []
         for ts in self.timestamps:
@@ -145,7 +141,7 @@ class ComplexUrbanDatasetLoader:
 
         logging.info(f"Loaded {len(self.img_files)} image entries from CSV.")
 
-        # --- Load GPS Data for Ground Truth ---
+        # Load GPS Data for Ground Truth
         vrs_gps_path = self.sequence_path / "sensor_data/vrs_gps.csv"
         if not vrs_gps_path.exists():
             logging.error("GPS file not found. GT poses will be empty.")
@@ -162,16 +158,12 @@ class ComplexUrbanDatasetLoader:
         # Convert ONLY these columns to numeric.
         # Any non-numeric value (like a header string) becomes NaN in that cell.
         for col in needed_cols:
-            gps_df[col] = pd.to_numeric(gps_df[col], errors="coerce")
-
-        # Drop rows ONLY if our critical columns have NaNs.
-        # This ignores garbage in other unused columns.
-        gps_df = gps_df.dropna(subset=needed_cols)
+            gps_df[col] = pd.to_numeric(gps_df[col])
 
         # Convert to numpy array
         gps_data = gps_df.values
 
-        # Now extraction is safe
+        # Extraction
         gps_ts_raw = gps_data[:, 0].astype(np.float64)
         gps_x_raw = gps_data[:, 3].astype(np.float64)
         gps_y_raw = gps_data[:, 4].astype(np.float64)
@@ -180,20 +172,8 @@ class ComplexUrbanDatasetLoader:
         if len(gps_ts_raw) == 0:
             raise ValueError(f"GPS data is empty after filtering! Check {vrs_gps_path}")
 
-        # --- Synchronize GPS to Camera Frames via Interpolation ---
+        # Synchronize GPS to Camera Frames via Interpolation
         target_ts = self.timestamps.astype(np.float64)
-
-        # interp requires the x-coordinates (gps_ts_raw) to be increasing.
-        # Usually they are, but sorting ensures safety.
-        sort_idx = np.argsort(gps_ts_raw)
-        gps_ts_raw = gps_ts_raw[sort_idx]
-        gps_x_raw = gps_x_raw[sort_idx]
-        gps_y_raw = gps_y_raw[sort_idx]
-        gps_z_raw = gps_z_raw[sort_idx]
-        # Note: We can't easily sort gps_data for the loop later if we split arrays here,
-        # but for simple position interpolation this is fine.
-        # For heading (row lookup), we need to reference the sorted data.
-        gps_data = gps_data[sort_idx]
 
         interp_x = np.interp(target_ts, gps_ts_raw, gps_x_raw)
         interp_y = np.interp(target_ts, gps_ts_raw, gps_y_raw)
@@ -209,12 +189,11 @@ class ComplexUrbanDatasetLoader:
             pose[1, 3] = -interp_z[i]  # Camera Y (Altitude inverted)
             pose[2, 3] = interp_y[i]  # Camera Z (Forward)
 
-            # Get nearest heading from the *sorted* data
-            # np.searchsorted is faster, but your logic uses nearest, so argmin is fine for small datasets
+            # Get nearest heading from the data
             idx_nearest = np.argmin(np.abs(gps_ts_raw - target_ts[i]))
             row_raw = gps_data[idx_nearest]
 
-            # Column 12: Heading Valid, Column 13: Heading Degrees
+            # Heading Valid
             if row_raw[12] == 1:
                 heading = np.radians(row_raw[13])
                 cos_h = np.cos(heading)
@@ -226,7 +205,7 @@ class ComplexUrbanDatasetLoader:
 
             raw_poses.append(pose)
 
-        # --- Normalize Poses ---
+        # Normalize Poses
         self.gt_poses = []
         if len(raw_poses) > 0:
             first_pose = raw_poses[0]
