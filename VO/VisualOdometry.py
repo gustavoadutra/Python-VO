@@ -106,7 +106,6 @@ class AbosluteScaleComputer(object):
 
         self.count += 1
         self.prev_pose = self.cur_pose
-        print(scale)
         return scale
 
 
