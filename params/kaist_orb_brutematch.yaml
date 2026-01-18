@@ -1,8 +1,8 @@
 dataset:
-  name: KITTILoader
-  root_path: /home/aki/Desktop/Datasets/kitti/
+  name: ComplexUrbanDatasetLoader
+  root_path: /home/aki/Desktop/Datasets/urban27-dongtan/
   #root_path: test_imgs
-  sequence: '00'
+  sequence: 'urban27'
   start: 0
 
 detector:

@@ -1,6 +1,7 @@
 from .KITTILoader import KITTILoader
 from .SequenceImageLoader import SequenceImageLoader
 from .TUMRGBLoader import TUMRGBLoader
+from .KAISTLoader import ComplexUrbanDatasetLoader
 
 
 def create_dataloader(conf):
