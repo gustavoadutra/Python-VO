@@ -13,6 +13,7 @@ from DataLoader import create_dataloader
 from Detectors import create_detector
 from Matchers import create_matcher
 from VO.VisualOdometry import VisualOdometry, AbosluteScaleComputer
+from WO.WheelOdometry import WheelOdometry
 
 
 def keypoints_plot(img, vo):
@@ -26,9 +27,7 @@ def keypoints_plot(img, vo):
 class TrajPlotter(object):
     def __init__(self):
         self.errors = []
-        # 1. Increase canvas size (e.g., from 600 to 1000 or 1200)
-        self.w, self.h = 800, 800
-        self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
+        self.traj = np.zeros((600, 600, 3), dtype=np.uint8)
         pass
 
     def update(self, est_xyz, gt_xyz):
@@ -39,30 +38,19 @@ class TrajPlotter(object):
         gt = np.array([gt_x, gt_z]).reshape(2)
 
         error = np.linalg.norm(est - gt)
+
         self.errors.append(error)
+
         avg_error = np.mean(np.array(self.errors))
 
         # === drawer ==================================
-
-        scale = 0.1
-
-        # Offset: Centers the start point.
-        offset_x = self.w // 2
-        offset_y = self.h // 2
-
-        # 3. Apply Scale and Offset to coordinates
-        draw_x, draw_y = int(x * scale) + offset_x, int(z * scale) + offset_y
-        true_x, true_y = int(gt_x * scale) + offset_x, int(gt_z * scale) + offset_y
+        # each point
+        draw_x, draw_y = int(x) + 290, int(z) + 90
+        true_x, true_y = int(gt_x) + 290, int(gt_z) + 90
 
         # draw trajectory
-        # Check bounds to prevent crashing if it still goes out
-        if 0 <= draw_x < self.w and 0 <= draw_y < self.h:
-            cv2.circle(self.traj, (draw_x, draw_y), 1, (0, 255, 0), 1)
-
-        if 0 <= true_x < self.w and 0 <= true_y < self.h:
-            cv2.circle(self.traj, (true_x, true_y), 1, (0, 0, 255), 2)
-
-        # Draw text background (dynamic width based on canvas)
+        cv2.circle(self.traj, (draw_x, draw_y), 1, (0, 255, 0), 1)
+        cv2.circle(self.traj, (true_x, true_y), 1, (0, 0, 255), 2)
         cv2.rectangle(self.traj, (10, 20), (600, 80), (0, 0, 0), -1)
 
         # draw text
@@ -95,7 +83,6 @@ def run(args):
     vo = VisualOdometry(detector, matcher, loader.cam)
     for i, img in enumerate(loader):
         gt_pose = loader.get_cur_pose()
-        # print(gt_pose)
         R, t = vo.update(img, absscale.update(gt_pose))
 
         # === log writer ==============================
