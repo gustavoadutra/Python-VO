@@ -186,7 +186,7 @@ class ComplexUrbanDatasetLoader:
 
             # Coordinate transformation
             pose[0, 3] = interp_x[i]  # Camera X
-            pose[1, 3] = -interp_z[i]  # Camera Y (Altitude inverted)
+            pose[1, 3] = interp_z[i]  # Camera Y (Altitude)
             pose[2, 3] = interp_y[i]  # Camera Z (Forward)
 
             # Get nearest heading from the data
