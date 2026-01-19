@@ -10,7 +10,7 @@ from DataLoader import create_dataloader
 from Detectors import create_detector
 from Matchers import create_matcher
 from VO.VisualOdometry import VisualOdometry, AbosluteScaleComputer
-from WO.WheelOdometry import WheelOdometry  # Ensure this import works
+from WO.WheelOdometry import WheelOdometry
 
 
 def keypoints_plot(img, vo):
@@ -24,7 +24,8 @@ def keypoints_plot(img, vo):
 class TrajPlotter(object):
     def __init__(self):
         self.errors = []
-        self.traj = np.zeros((600, 600, 3), dtype=np.uint8)
+        self.w, self.h = 800, 800
+        self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
 
     def update(self, est_xyz, gt_xyz, wo_xyz=None):
         """
@@ -45,10 +46,14 @@ class TrajPlotter(object):
 
         # === Coordinate Transformation for Drawing ===
         # Centering the drawing on the canvas (Adjust 290/90 if needed)
-        offset_x, offset_y = 290, 90
+        scale = 0.1
 
-        draw_x, draw_y = int(x) + offset_x, int(z) + offset_y
-        true_x, true_y = int(gt_x) + offset_x, int(gt_z) + offset_y
+        # Offset: Centers the start point.
+        offset_x = self.w // 2
+        offset_y = self.h // 2
+
+        draw_x, draw_y = int(x * scale) + offset_x, int(z * scale) + offset_y
+        true_x, true_y = int(gt_x * scale) + offset_x, int(gt_z * scale) + offset_y
 
         # Draw Visual Odometry (Green)
         cv2.circle(self.traj, (draw_x, draw_y), 1, (0, 255, 0), 1)
@@ -100,24 +105,21 @@ def run(args):
     # create matcher
     matcher = create_matcher(config["matcher"])
 
-    # Initialize generic scale computer (fallback)
+    # Initialize generic scale computer
     absscale = AbosluteScaleComputer()
 
     # Initialize Plotter
     traj_plotter = TrajPlotter()
 
     # === Wheel Odometry Setup ===
-    use_wheel_odometry = False
-    wo = None
-
     # We check if an encoder CSV was provided. If so, we assume KAIST workflow.
     if args.encoder_csv:
         print("[INFO] KAIST Workflow Detected: Initializing Wheel Odometry...")
         # KAIST Prius Parameters: Radius ~0.315m, Baseline ~1.58m, Ticks ~8192
         wo = WheelOdometry(wheel_radius=0.315, base_line=1.58, ticks_per_rev=8192)
         wo.load_kaist_csv(args.encoder_csv)
-        use_wheel_odometry = True
     else:
+        wo = None
         print("[INFO] No encoder CSV found. Using Ground Truth for scale (KITTI Mode).")
 
     # log file
@@ -126,57 +128,42 @@ def run(args):
 
     vo = VisualOdometry(detector, matcher, loader.cam)
 
-    prev_wo_t = None
-
     # Main Loop
     for i, img in enumerate(loader):
         gt_pose = loader.get_cur_pose()
 
-        current_scale = 1.0
-        wo_position = None
+        t_wo = None
 
         # === 1. Calculate Scale & Position from Wheel Odometry ===
-        if use_wheel_odometry:
-            # We need the timestamp. Assuming loader has .times list (standard for these datasets)
-            try:
-                timestamp = loader.times[i]
+        if wo:
+            timestamp = loader.times[i]
 
-                # Get interpolated ticks
-                l_tick, r_tick = wo.get_interpolated_ticks(timestamp)
+            # Get interpolated ticks
+            l_tick, r_tick = wo.get_interpolated_ticks(timestamp)
 
-                # Update WO
-                R_wo, t_wo = wo.update(l_tick, r_tick)
-                wo_position = t_wo  # For plotting
+            # Update WO
+            R_wo, t_wo = wo.update(l_tick, r_tick)
 
-                # Calculate Scale (Distance moved since last frame)
-                if i == 0:
-                    current_scale = 0.1  # robust initialization
-                    prev_wo_t = t_wo.copy()
-                else:
-                    current_scale = np.linalg.norm(t_wo - prev_wo_t)
-                    prev_wo_t = t_wo.copy()
-
-            except AttributeError:
-                print("[ERROR] Loader does not have 'times' attribute needed for sync.")
-                break
-        else:
-            # Fallback to GT scale (Original Logic)
-            current_scale = absscale.update(gt_pose)
+        # GT scale (Original Logic)
+        current_scale = absscale.update(gt_pose)
 
         # === 2. Update Visual Odometry ===
         # If using WO, we pass the wheel-derived scale.
         # If not, we pass the GT-derived scale.
-        R, t = vo.update(img, absolute_scale=current_scale)
+        R_vo, t_vo = vo.update(img, absolute_scale=current_scale)
 
         # === log writer ==============================
         print(
             i,
-            t[0, 0],
-            t[1, 0],
-            t[2, 0],
+            t_vo[0, 0],
+            t_vo[1, 0],
+            t_vo[2, 0],
             gt_pose[0, 3],
             gt_pose[1, 3],
             gt_pose[2, 3],
+            t_wo[0, 0],
+            t_wo[1, 0],
+            t_wo[2, 0],
             file=log_fopen,
         )
 
@@ -184,7 +171,7 @@ def run(args):
         img1 = keypoints_plot(img, vo)
 
         # Pass WO position to plotter if it exists
-        img2 = traj_plotter.update(t, gt_pose[:, 3], wo_xyz=wo_position)
+        img2 = traj_plotter.update(t_vo, gt_pose[:, 3], wo_xyz=t_wo)
 
         cv2.imshow("keypoints", img1)
         cv2.imshow("trajectory", img2)
