@@ -63,7 +63,10 @@ class TrajPlotter(object):
 
         # Draw Wheel Odometry (Blue) - if available
         if wo_xyz is not None:
-            wo_x, wo_z = int(wo_xyz[0]) + offset_x, int(wo_xyz[2]) + offset_y
+            wo_x, wo_z = (
+                int(wo_xyz[0] * scale) + offset_x,
+                int(wo_xyz[1] * scale) + offset_y,
+            )
             cv2.circle(self.traj, (wo_x, wo_z), 1, (255, 0, 0), 1)
 
         # Legend and Text
@@ -113,14 +116,13 @@ def run(args):
 
     # === Wheel Odometry Setup ===
     # We check if an encoder CSV was provided. If so, we assume KAIST workflow.
-    if args.encoder_csv:
+    if args.encoder:
         print("[INFO] KAIST Workflow Detected: Initializing Wheel Odometry...")
         # KAIST Prius Parameters: Radius ~0.315m, Baseline ~1.58m, Ticks ~8192
-        wo = WheelOdometry(wheel_radius=0.315, base_line=1.58, ticks_per_rev=8192)
-        wo.load_kaist_csv(args.encoder_csv)
+        wo = WheelOdometry(config["dataset"])
     else:
         wo = None
-        print("[INFO] No encoder CSV found. Using Ground Truth for scale (KITTI Mode).")
+        print("[INFO] No wheel encoder will be used.")
 
     # log file
     fname = args.config.split("/")[-1].split(".")[0]
@@ -137,20 +139,22 @@ def run(args):
         # === 1. Calculate Scale & Position from Wheel Odometry ===
         if wo:
             timestamp = loader.times[i]
-
+            print("timestamp vo:", timestamp)
             # Get interpolated ticks
             l_tick, r_tick = wo.get_interpolated_ticks(timestamp)
-
+            print(l_tick, r_tick)
             # Update WO
             R_wo, t_wo = wo.update(l_tick, r_tick)
-
+            print("Translation WO:", t_wo)
         # GT scale (Original Logic)
         current_scale = absscale.update(gt_pose)
+        # current_scale = 1
 
         # === 2. Update Visual Odometry ===
         # If using WO, we pass the wheel-derived scale.
         # If not, we pass the GT-derived scale.
         R_vo, t_vo = vo.update(img, absolute_scale=current_scale)
+        print("Translation VO:", t_vo)
 
         # === log writer ==============================
         print(
@@ -192,10 +196,10 @@ if __name__ == "__main__":
     )
     # Added argument specifically for KAIST wheel data
     parser.add_argument(
-        "--encoder_csv",
+        "encoder",
         type=str,
         default=None,
-        help="Path to KAIST encoder.csv file. If provided, enables Wheel Odometry.",
+        help="Wheel encoder will be used.",
     )
     parser.add_argument(
         "--logging",
