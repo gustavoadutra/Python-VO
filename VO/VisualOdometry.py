@@ -33,7 +33,7 @@ class VisualOdometry(object):
         self.cur_R = None
         self.cur_t = None
 
-    def update(self, image, absolute_scale=1):
+    def update(self, image, absolute_scale=1.0):
         """
         update a new image to visual odometry, and compute the pose
         :param image: input image

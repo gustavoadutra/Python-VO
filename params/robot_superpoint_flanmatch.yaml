@@ -1,0 +1,23 @@
+dataset:
+  name: ComplexUrbanDatasetLoader
+  root_path: /home/aki/Desktop/old_cuscobot/
+  #root_path: test_imgs
+  sequence: dataset_20260126_101756
+  start: 0
+
+detector:
+  name: SuperPointDetector
+  descriptor_dim: 256
+  nms_radius: 4
+  keypoint_threshold: 0.005
+  max_keypoints: -1
+  remove_borders: 4
+  cuda: 1
+
+matcher:
+  name: FrameByFrameMatcher
+  type: FLANN
+  FLANN:
+    kdTrees: 5
+    searchChecks: 50
+  distance_ratio: 0.75

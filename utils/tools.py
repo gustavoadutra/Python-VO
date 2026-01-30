@@ -6,7 +6,7 @@ import matplotlib.cm as cm
 
 
 def image2tensor(frame, device):
-    return torch.from_numpy(frame / 255.).float()[None, None].to(device)
+    return torch.from_numpy(frame / 255.0).float()[None, None].to(device)
 
 
 # --- VISUALIZATION ---
@@ -17,16 +17,15 @@ def plot_keypoints(image, kpts, scores=None):
     if scores is not None:
         # get color
         smin, smax = scores.min(), scores.max()
-        assert (0 <= smin <= 1 and 0 <= smax <= 1)
 
-        color = cm.gist_rainbow(scores * 0.4)
-        color = (np.array(color[:, :3]) * 255).astype(int)[:, ::-1]
-        # text = f"min score: {smin}, max score: {smax}"
+        if 0 <= smin <= 1 and 0 <= smax <= 1:
+            color = cm.gist_rainbow(scores * 0.4)
+            color = (np.array(color[:, :3]) * 255).astype(int)[:, ::-1]
+            # text = f"min score: {smin}, max score: {smax}"
 
-        for (x, y), c in zip(kpts, color):
-            c = (int(c[0]), int(c[1]), int(c[2]))
-            cv2.drawMarker(image, (x, y), tuple(c), cv2.MARKER_CROSS, 6)
-
+            for (x, y), c in zip(kpts, color):
+                c = (int(c[0]), int(c[1]), int(c[2]))
+                cv2.drawMarker(image, (x, y), tuple(c), cv2.MARKER_CROSS, 6)
     else:
         for x, y in kpts:
             cv2.drawMarker(image, (x, y), (0, 255, 0), cv2.MARKER_CROSS, 6)
@@ -67,7 +66,7 @@ def plot_matches(image0, image1, kpts0, kpts1, scores=None, layout="lr"):
     # get color
     if scores is not None:
         smin, smax = scores.min(), scores.max()
-        assert (0 <= smin <= 1 and 0 <= smax <= 1)
+        assert 0 <= smin <= 1 and 0 <= smax <= 1
 
         color = cm.gist_rainbow(scores * 0.4)
         color = (np.array(color[:, :3]) * 255).astype(int)[:, ::-1]
@@ -78,12 +77,16 @@ def plot_matches(image0, image1, kpts0, kpts1, scores=None, layout="lr"):
     for (x0, y0), (x1, y1), c in zip(kpts0, kpts1, color):
         c = c.tolist()
         if layout == "lr":
-            cv2.line(out, (x0, y0), (x1 + W0, y1), color=c, thickness=1, lineType=cv2.LINE_AA)
+            cv2.line(
+                out, (x0, y0), (x1 + W0, y1), color=c, thickness=1, lineType=cv2.LINE_AA
+            )
             # display line end-points as circles
             cv2.circle(out, (x0, y0), 2, c, -1, lineType=cv2.LINE_AA)
             cv2.circle(out, (x1 + W0, y1), 2, c, -1, lineType=cv2.LINE_AA)
         elif layout == "ud":
-            cv2.line(out, (x0, y0), (x1, y1 + H0), color=c, thickness=1, lineType=cv2.LINE_AA)
+            cv2.line(
+                out, (x0, y0), (x1, y1 + H0), color=c, thickness=1, lineType=cv2.LINE_AA
+            )
             # display line end-points as circles
             cv2.circle(out, (x0, y0), 2, c, -1, lineType=cv2.LINE_AA)
             cv2.circle(out, (x1, y1 + H0), 2, c, -1, lineType=cv2.LINE_AA)
