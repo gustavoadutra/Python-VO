@@ -55,6 +55,9 @@ class ComplexUrbanDatasetLoader:
         if not fs.isOpened():
             raise ValueError(f"Could not open calibration file: {calib_file}")
 
+        self.width = int(fs.getNode("image_width").real())
+        self.height = int(fs.getNode("image_height").real())
+        print(self.height, self.width)
         self.K_raw = fs.getNode("camera_matrix").mat()
         self.D = fs.getNode("distortion_coefficients").mat()
         self.R = fs.getNode("rectification_matrix").mat()
@@ -63,13 +66,18 @@ class ComplexUrbanDatasetLoader:
         fs.release()
 
         self.map1, self.map2 = cv2.initUndistortRectifyMap(
-            self.K_raw, self.D, self.R, self.P[:3, :3], (1280, 560), cv2.CV_32F
+            self.K_raw,
+            self.D,
+            self.R,
+            self.P[:3, :3],
+            (self.width, self.height),
+            cv2.CV_32F,
         )
 
         if PinholeCamera is not None:
             self.cam = PinholeCamera(
-                width=1280,
-                height=560,
+                width=self.width,
+                height=self.height,
                 fx=self.P[0, 0],
                 fy=self.P[1, 1],
                 cx=self.P[0, 2],
@@ -82,19 +90,44 @@ class ComplexUrbanDatasetLoader:
         """
         # Load Image Timestamps from CSV
         stamp_file_path = self.sequence_path / "sensor_data/stereo_stamp.csv"
+        print(stamp_file_path.exists())
+        # Lógica de Fallback
+        if stamp_file_path.exists():
+            # Caso 1: Arquivo CSV existe - carrega normalmente
+            df_stamps = pd.read_csv(stamp_file_path, header=None)
+            self.timestamps = pd.to_numeric(df_stamps.iloc[:, 0]).values.astype(
+                np.int64
+            )
+        else:
+            # Caso 2: Arquivo não existe - carrega da pasta de imagens
+            print(
+                f"Aviso: {stamp_file_path} não encontrado. Criando timestamps a partir da pasta de imagens."
+            )
 
-        if not stamp_file_path.exists():
-            raise FileNotFoundError(f"Timestamp file not found: {stamp_file_path}")
+            # Busca todos os arquivos .png na pasta
+            image_paths = list(self.img_folder.glob("*.png"))
 
-        # Load timestamps (Nanoseconds)
-        df_stamps = pd.read_csv(stamp_file_path, header=None)
-        self.timestamps = pd.to_numeric(df_stamps.iloc[:, 0]).values.astype(np.int64)
-        print("timestamps", self.timestamps[0])
+            if not image_paths:
+                raise FileNotFoundError(
+                    f"Nenhuma imagem encontrada em: {self.img_folder} para gerar timestamps."
+                )
+
+            # Extrai o nome do arquivo (sem extensão) e converte para int
+            # Exemplo: path/to/1600000.png -> 1600000
+            try:
+                ts_list = [int(p.stem) for p in image_paths]
+            except ValueError:
+                raise ValueError(
+                    "Os nomes das imagens não são numéricos, impossível gerar timestamps automaticamente."
+                )
+
+            # É crucial ordenar os timestamps, pois o sistema de arquivos não garante ordem
+            self.timestamps = np.array(sorted(ts_list), dtype=np.int64)
+
         # === CRITICAL ADDITION FOR WHEEL ODOMETRY SYNC ===
         # Convert nanoseconds to seconds so main.py can sync with encoder.csv
         self.times = self.timestamps / 1e9
         # =================================================
-        print("time", self.times)
         self.img_files = []
         for ts in self.timestamps:
             img_p = self.img_folder / f"{ts}.png"
@@ -109,7 +142,7 @@ class ComplexUrbanDatasetLoader:
             self.gt_poses = []
             return
 
-        gps_df = pd.read_csv(vrs_gps_path, header=None)
+        gps_df = pd.read_csv(vrs_gps_path, header=None, sep=",")
         needed_cols = [0, 3, 4, 5, 12, 13]
         for col in needed_cols:
             gps_df[col] = pd.to_numeric(gps_df[col])
@@ -182,6 +215,7 @@ class ComplexUrbanDatasetLoader:
                     img = np.zeros((560, 1280, 3), dtype=np.uint8)
 
             img_rectified = cv2.remap(img, self.map1, self.map2, cv2.INTER_LINEAR)
+            # img_rectified = cv2.rotate(img, cv2.ROTATE_180)
             self.img_id += 1
             return img_rectified
 

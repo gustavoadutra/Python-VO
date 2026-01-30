@@ -110,7 +110,6 @@ class WheelOdometry(object):
             return 0, 0
 
         idx = np.searchsorted(self.df["timestamp"], target_time)
-        print("indice encontrado", idx)
 
         if idx == 0:
             return self.df.iloc[0]["left"], self.df.iloc[0]["right"]
@@ -124,7 +123,6 @@ class WheelOdometry(object):
             return row_prev["left"], row_prev["right"]
 
         alpha = (target_time - t1) / (t2 - t1)
-        print(alpha)
         interp_left = row_prev["left"] + alpha * (row_next["left"] - row_prev["left"])
         interp_right = row_prev["right"] + alpha * (
             row_next["right"] - row_prev["right"]
@@ -146,18 +144,15 @@ class WheelOdometry(object):
             # Use asymmetric conversion factors
             d_left = d_left_ticks * self.tick_to_meter_left
             d_right = d_right_ticks * self.tick_to_meter_right
-            print("left meters", d_left)
-            print("left right", d_right)
+
             # Differential Drive Math
             dist_center = (d_right + d_left) / 2.0
-            print(dist_center)
             d_theta = (d_right - d_left) / self.base_line
 
             # Move along current heading
             dx = dist_center * np.cos(d_theta / 2.0)
             dy = dist_center * np.sin(d_theta / 2.0)
-            print("dx dy")
-            print(dx, dy)
+
             # Update Pose
             dt_rel = np.array([[dx], [dy], [0.0]])
             c, s = np.cos(d_theta), np.sin(d_theta)

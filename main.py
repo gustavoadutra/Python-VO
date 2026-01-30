@@ -46,7 +46,7 @@ class TrajPlotter(object):
 
         # === Coordinate Transformation for Drawing ===
         # Centering the drawing on the canvas (Adjust 290/90 if needed)
-        scale = 0.1
+        scale = 0.5
 
         # Offset: Centers the start point.
         offset_x = self.w // 2
@@ -101,62 +101,48 @@ def run(args):
     with open(args.config, "r") as f:
         config = yaml.load(f, yaml.Loader)
 
-    # create dataloader
     loader = create_dataloader(config["dataset"])
-    # create detector
     detector = create_detector(config["detector"])
-    # create matcher
     matcher = create_matcher(config["matcher"])
-
-    # Initialize generic scale computer
     absscale = AbosluteScaleComputer()
-
-    # Initialize Plotter
     traj_plotter = TrajPlotter()
 
-    # === Wheel Odometry Setup ===
-    # We check if an encoder CSV was provided. If so, we assume KAIST workflow.
+    # Initialize Wheel Odometry only if the flag is True
+    wo = None
     if args.encoder:
-        print("[INFO] KAIST Workflow Detected: Initializing Wheel Odometry...")
-        # KAIST Prius Parameters: Radius ~0.315m, Baseline ~1.58m, Ticks ~8192
+        print("[INFO] Encoder Flag Detected: Initializing Wheel Odometry...")
         wo = WheelOdometry(config["dataset"])
-    else:
-        wo = None
-        print("[INFO] No wheel encoder will be used.")
 
-    # log file
     fname = args.config.split("/")[-1].split(".")[0]
     log_fopen = open("results/" + fname + ".txt", mode="a")
-
     vo = VisualOdometry(detector, matcher, loader.cam)
 
-    # Main Loop
     for i, img in enumerate(loader):
         gt_pose = loader.get_cur_pose()
+        t_wo = None  # Default if no wheel odometry
 
-        t_wo = None
+        # 1. Handle Scaling Logic
+        if args.robot:
+            current_scale = 0.11
 
-        # === 1. Calculate Scale & Position from Wheel Odometry ===
+        current_scale = absscale.update(gt_pose)
+
+        # 2. Wheel Odometry update
         if wo:
             timestamp = loader.times[i]
-            print("timestamp vo:", timestamp)
-            # Get interpolated ticks
             l_tick, r_tick = wo.get_interpolated_ticks(timestamp)
-            print(l_tick, r_tick)
-            # Update WO
             R_wo, t_wo = wo.update(l_tick, r_tick)
-            print("Translation WO:", t_wo)
-        # GT scale (Original Logic)
-        current_scale = absscale.update(gt_pose)
-        # current_scale = 1
 
-        # === 2. Update Visual Odometry ===
-        # If using WO, we pass the wheel-derived scale.
-        # If not, we pass the GT-derived scale.
+        # 3. Visual Odometry update
         R_vo, t_vo = vo.update(img, absolute_scale=current_scale)
-        print("Translation VO:", t_vo)
 
-        # === log writer ==============================
+        if args.robot:
+            gt_pose[0], gt_pose[1] = gt_pose[1], gt_pose[0]
+
+        # 4. Logging (Handling None for t_wo)
+        # We use a fallback [0,0,0] if t_wo is None for consistent column count
+        wo_log = t_wo if t_wo is not None else np.zeros((3, 1))
+
         print(
             i,
             t_vo[0, 0],
@@ -165,16 +151,14 @@ def run(args):
             gt_pose[0, 3],
             gt_pose[1, 3],
             gt_pose[2, 3],
-            t_wo[0, 0],
-            t_wo[1, 0],
-            t_wo[2, 0],
+            wo_log[0, 0],
+            wo_log[1, 0],
+            wo_log[2, 0],
             file=log_fopen,
         )
 
-        # === drawer ==================================
+        # 5. Visualization
         img1 = keypoints_plot(img, vo)
-
-        # Pass WO position to plotter if it exists
         img2 = traj_plotter.update(t_vo, gt_pose[:, 3], wo_xyz=t_wo)
 
         cv2.imshow("keypoints", img1)
@@ -194,12 +178,16 @@ if __name__ == "__main__":
         default="params/kitti_superpoint_supergluematch.yaml",
         help="config file",
     )
-    # Added argument specifically for KAIST wheel data
+    # Changed to optional flags (store_true)
     parser.add_argument(
-        "encoder",
-        type=str,
-        default=None,
-        help="Wheel encoder will be used.",
+        "--encoder",
+        action="store_true",
+        help="If set, Wheel Odometry will be used.",
+    )
+    parser.add_argument(
+        "--robot",
+        action="store_true",
+        help="If set, use robot dataset scaling logic.",
     )
     parser.add_argument(
         "--logging",
@@ -209,7 +197,5 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-
     logging.basicConfig(level=logging._nameToLevel[args.logging])
-
     run(args)
