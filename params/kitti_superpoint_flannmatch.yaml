@@ -4,7 +4,6 @@ dataset:
   #root_path: test_imgs
   sequence: '00'
   start: 0
-
 detector:
   name: SuperPointDetector
   descriptor_dim: 256

@@ -3,6 +3,9 @@ dataset:
   root_path: /home/aki/Desktop/old_cuscobot/
   sequence: dataset_20260126_105418/
   start: 0
+  is_robot: True
+  scale_x: 1.0
+  scale_y: 1.0
 
 detector:
   name: XfeatDetector

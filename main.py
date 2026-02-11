@@ -107,6 +107,11 @@ def run(args):
     absscale = AbosluteScaleComputer()
     traj_plotter = TrajPlotter()
 
+    # Check if this is a robot dataset from config
+    is_robot = config["dataset"].get("is_robot", False)
+    scale_x = config["dataset"].get("scale_x", 1.0) if is_robot else 1.0
+    scale_y = config["dataset"].get("scale_y", 1.0) if is_robot else 1.0
+
     # Initialize Wheel Odometry only if the flag is True
     wo = None
     if args.encoder:
@@ -122,22 +127,29 @@ def run(args):
         t_wo = None  # Default if no wheel odometry
 
         # 1. Handle Scaling Logic
-        if args.robot:
-            current_scale = 0.11
-
-        current_scale = absscale.update(gt_pose)
+        if is_robot:
+            current_scale = 2
+        else:
+            current_scale = absscale.update(gt_pose)
 
         # 2. Wheel Odometry update
         if wo:
             timestamp = loader.times[i]
             l_tick, r_tick = wo.get_interpolated_ticks(timestamp)
             R_wo, t_wo = wo.update(l_tick, r_tick)
+            # Apply scales to wheel odometry if robot dataset
+            if is_robot and t_wo is not None:
+                t_wo[0, 0] *= scale_x
+                t_wo[1, 0] *= scale_y
 
         # 3. Visual Odometry update
         R_vo, t_vo = vo.update(img, absolute_scale=current_scale)
 
-        if args.robot:
+        if is_robot:
             gt_pose[0], gt_pose[1] = gt_pose[1], gt_pose[0]
+            # Apply scales to ground truth if robot dataset
+            gt_pose[0, 3] *= scale_x
+            gt_pose[2, 3] *= scale_y
 
         # 4. Logging (Handling None for t_wo)
         # We use a fallback [0,0,0] if t_wo is None for consistent column count
@@ -183,11 +195,6 @@ if __name__ == "__main__":
         "--encoder",
         action="store_true",
         help="If set, Wheel Odometry will be used.",
-    )
-    parser.add_argument(
-        "--robot",
-        action="store_true",
-        help="If set, use robot dataset scaling logic.",
     )
     parser.add_argument(
         "--logging",
