@@ -4,6 +4,7 @@ dataset:
   #root_path: test_imgs
   sequence: dataset_20260126_105418/
   start: 0
+  is_robot: True
 
 detector:
   name: HandcraftDetector

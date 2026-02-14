@@ -1,0 +1,19 @@
+dataset:
+  name: TUMRGBLoader
+  root_path: /mnt/dataset_hdd/tumrgbd
+  scene: rgbd_dataset_freiburg1_360
+  start: 0
+
+detector:
+  name: XfeatDetector
+  cuda: 1
+  top_k: 4096
+  detection_threshold: 0.05
+
+matcher:
+  name: FrameByFrameMatcher
+  type: KNN
+  KNN:
+    HAMMING: False  # Use L2 bruteforce for float descriptors
+    first_N: 300
+  distance_ratio: 0.75

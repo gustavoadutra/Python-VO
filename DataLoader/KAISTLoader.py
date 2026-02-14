@@ -57,7 +57,6 @@ class ComplexUrbanDatasetLoader:
 
         self.width = int(fs.getNode("image_width").real())
         self.height = int(fs.getNode("image_height").real())
-        print(self.height, self.width)
         self.K_raw = fs.getNode("camera_matrix").mat()
         self.D = fs.getNode("distortion_coefficients").mat()
         self.R = fs.getNode("rectification_matrix").mat()
