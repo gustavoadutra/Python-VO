@@ -1,6 +1,6 @@
 from .HandcraftDetector import HandcraftDetector
 from .SuperPointDetector import SuperPointDetector
-
+from .XfeatDetector import XfeatDetector
 
 def create_detector(conf):
     try:

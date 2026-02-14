@@ -1,0 +1,18 @@
+dataset:
+  name: ComplexUrbanDatasetLoader
+  root_path: /home/aki/Desktop/old_cuscobot/
+  #root_path: test_imgs
+  sequence: dataset_20260126_101756
+  start: 0
+  is_robot: True
+detector:
+  name: XfeatDetector
+  cuda: 1
+  top_k: 1000
+  detection_threshold: 0
+
+matcher:
+  name: LighterGlueMatcher
+  weights: /home/aki/Desktop/Python-VO/Detectors/accelerated_features/weights/xfeat-lighterglue.pt
+  min_conf: 0.0
+  cuda: 1
