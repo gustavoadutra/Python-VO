@@ -5,8 +5,6 @@ dataset:
   sequence: dataset_20260126_101756
   start: 0
   is_robot: True
-  scale_x: 1.0
-  scale_y: 1.0
 detector:
   name: SuperPointDetector
   descriptor_dim: 256

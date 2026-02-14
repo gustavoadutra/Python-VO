@@ -22,12 +22,14 @@ def keypoints_plot(img, vo):
 
 
 class TrajPlotter(object):
-    def __init__(self):
+    def __init__(self, is_robot=False):
         self.errors = []
         self.w, self.h = 800, 800
         self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
+        self.scale = 0.5 if not is_robot else 500  # Adjust scale for robot datasets
+        
 
-    def update(self, est_xyz, gt_xyz, wo_xyz=None):
+    def update(self, est_xyz, gt_xyz, wo_xyz=None, is_robot=False):
         """
         Updates the trajectory plot.
         :param est_xyz: Visual Odometry position
@@ -44,16 +46,12 @@ class TrajPlotter(object):
         self.errors.append(error)
         avg_error = np.mean(np.array(self.errors))
 
-        # === Coordinate Transformation for Drawing ===
-        # Centering the drawing on the canvas (Adjust 290/90 if needed)
-        scale = 0.5
-
         # Offset: Centers the start point.
         offset_x = self.w // 2
         offset_y = self.h // 2
 
-        draw_x, draw_y = int(x * scale) + offset_x, int(z * scale) + offset_y
-        true_x, true_y = int(gt_x * scale) + offset_x, int(gt_z * scale) + offset_y
+        draw_x, draw_y = int(x * self.scale) + offset_x, int(z * self.scale) + offset_y
+        true_x, true_y = int(gt_x * self.scale) + offset_x, int(gt_z * self.scale) + offset_y
 
         # Draw Visual Odometry (Green)
         cv2.circle(self.traj, (draw_x, draw_y), 1, (0, 255, 0), 1)
@@ -64,8 +62,8 @@ class TrajPlotter(object):
         # Draw Wheel Odometry (Blue) - if available
         if wo_xyz is not None:
             wo_x, wo_z = (
-                int(wo_xyz[0] * scale) + offset_x,
-                int(wo_xyz[1] * scale) + offset_y,
+                int(wo_xyz[0] * self.scale) + offset_x,
+                int(wo_xyz[1] * self.scale) + offset_y,
             )
             cv2.circle(self.traj, (wo_x, wo_z), 1, (255, 0, 0), 1)
 
@@ -105,12 +103,10 @@ def run(args):
     detector = create_detector(config["detector"])
     matcher = create_matcher(config["matcher"])
     absscale = AbosluteScaleComputer()
-    traj_plotter = TrajPlotter()
 
     # Check if this is a robot dataset from config
     is_robot = config["dataset"].get("is_robot", False)
-    scale_x = config["dataset"].get("scale_x", 1.0) if is_robot else 1.0
-    scale_y = config["dataset"].get("scale_y", 1.0) if is_robot else 1.0
+    traj_plotter = TrajPlotter(is_robot=is_robot)
 
     # Initialize Wheel Odometry only if the flag is True
     wo = None
@@ -126,30 +122,21 @@ def run(args):
         gt_pose = loader.get_cur_pose()
         t_wo = None  # Default if no wheel odometry
 
-        # 1. Handle Scaling Logic
-        if is_robot:
-            current_scale = 2
-        else:
-            current_scale = absscale.update(gt_pose)
+        current_scale = absscale.update(gt_pose)
 
         # 2. Wheel Odometry update
         if wo:
             timestamp = loader.times[i]
             l_tick, r_tick = wo.get_interpolated_ticks(timestamp)
             R_wo, t_wo = wo.update(l_tick, r_tick)
-            # Apply scales to wheel odometry if robot dataset
-            if is_robot and t_wo is not None:
-                t_wo[0, 0] *= scale_x
-                t_wo[1, 0] *= scale_y
+
 
         # 3. Visual Odometry update
         R_vo, t_vo = vo.update(img, absolute_scale=current_scale)
 
         if is_robot:
             gt_pose[0], gt_pose[1] = gt_pose[1], gt_pose[0]
-            # Apply scales to ground truth if robot dataset
-            gt_pose[0, 3] *= scale_x
-            gt_pose[2, 3] *= scale_y
+
 
         # 4. Logging (Handling None for t_wo)
         # We use a fallback [0,0,0] if t_wo is None for consistent column count
@@ -177,7 +164,7 @@ def run(args):
         cv2.imshow("trajectory", img2)
         if cv2.waitKey(10) == 27:
             break
-
+ 
     cv2.imwrite("results/" + fname + ".png", img2)
     log_fopen.close()
 
