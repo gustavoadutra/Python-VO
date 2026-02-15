@@ -163,4 +163,4 @@ class WheelOdometry(object):
             self.cur_theta += d_theta
 
         self.index += 1
-        return self.cur_R, self.cur_t
+        return self.cur_theta, self.cur_R, self.cur_t
