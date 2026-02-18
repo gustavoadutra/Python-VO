@@ -1,11 +1,13 @@
+
+import logging
 from typing import Dict
 
 import numpy as np
-import logging
 
-class ExtendedKalmanFilter(object):
+
+class LinearKalmanFilter(object):
     """
-    Extended Kalman Filter for state estimation (pose fusion of VO and WO).
+    Linear Kalman Filter for state estimation (pose fusion of VO and WO).
     
     State vector: [x, y, theta]
     Uses constant-velocity motion model with linear measurement model.
@@ -62,13 +64,13 @@ class ExtendedKalmanFilter(object):
         # and state would include velocities
         F = np.eye(3)
         
-        # State prediction (this step was missing in original code)
+        # State prediction 
         # For constant position: x stays same
         # If you add velocity to state, this becomes: x_new = F @ x + B @ u
         self.state = F @ self.state
         
         # Predict covariance: P_pred = F * P * F^T + Q
-        # This increases uncertainty over time (motion adds uncertainty)
+        # This increases uncertainty over time
         self.P = F @ self.P @ F.T + self.Q
 
     def update(self, vo_data, wo_data, R_noise_vo=None, R_noise_wo=None):

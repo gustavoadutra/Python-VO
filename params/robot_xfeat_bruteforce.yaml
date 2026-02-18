@@ -8,7 +8,7 @@ dataset:
 detector:
   name: XfeatDetector
   cuda: 1
-  top_k: 4096
+  top_k: 1000
   detection_threshold: 0.05
 
 matcher:
@@ -18,3 +18,7 @@ matcher:
     HAMMING: False  # Use L2 bruteforce for float descriptors
     first_N: 300
   distance_ratio: 0.75
+
+ekf:
+  measurement_noise_vo: 0.1
+  measurement_noise_wo: 0.1

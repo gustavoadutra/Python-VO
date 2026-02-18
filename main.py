@@ -11,6 +11,8 @@ from Detectors import create_detector
 from Matchers import create_matcher
 from VO.VisualOdometry import VisualOdometry, AbosluteScaleComputer
 from WO.WheelOdometry import WheelOdometry
+from filters.LKF import LinearKalmanFilter
+from filters.EKF import ExtendedKalmanFilter
 
 
 def keypoints_plot(img, vo):
@@ -26,15 +28,16 @@ class TrajPlotter(object):
         self.errors = []
         self.w, self.h = 800, 800
         self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
-        self.scale = 0.5 if not is_robot else 500  # Adjust scale for robot datasets
+        self.scale = 0.5 if not is_robot else 100  # Adjust scale for robot datasets
         
 
-    def update(self, est_xyz, gt_xyz, wo_xyz=None, is_robot=False):
+    def update(self, est_xyz, gt_xyz, wo_xyz=None, ekf_xyz=None):
         """
         Updates the trajectory plot.
         :param est_xyz: Visual Odometry position
         :param gt_xyz: Ground Truth position
         :param wo_xyz: Wheel Odometry position (Optional)
+        :param ekf_xyz: EKF position (Optional)
         """
         x, z = est_xyz[0], est_xyz[2]
         gt_x, gt_z = gt_xyz[0], gt_xyz[2]
@@ -67,6 +70,13 @@ class TrajPlotter(object):
             )
             cv2.circle(self.traj, (wo_x, wo_z), 1, (255, 0, 0), 1)
 
+        if ekf_xyz is not None:
+            ekf_x, ekf_z = (
+                int(ekf_xyz[0] * self.scale) + offset_x,
+                int(ekf_xyz[2] * self.scale) + offset_y,
+            )
+            cv2.circle(self.traj, (ekf_x, ekf_z), 1, (255, 255, 0), 1)
+
         # Legend and Text
         cv2.rectangle(self.traj, (10, 20), (600, 80), (0, 0, 0), -1)
         text = "AvgError: %2.4fm" % (avg_error)
@@ -91,6 +101,16 @@ class TrajPlotter(object):
                 (255, 0, 0),
                 1,
             )
+        if ekf_xyz is not None:
+            cv2.putText(
+                self.traj,
+                "EKF (Cyan)",
+                (400, 60),
+                cv2.FONT_HERSHEY_PLAIN,
+                1,
+                (255, 255, 0),
+                1,
+            )
 
         return self.traj
 
@@ -102,6 +122,20 @@ def run(args):
     loader = create_dataloader(config["dataset"])
     detector = create_detector(config["detector"])
     matcher = create_matcher(config["matcher"])
+    
+    # Select filter: LKF or EKF
+    if args.filter == "lkf":
+        filter_obj = LinearKalmanFilter(config.get("filter", {}))
+        filter_name = "Linear Kalman Filter (LKF)"
+    elif args.filter == "ekf":
+        filter_obj = ExtendedKalmanFilter(config.get("filter", {}))
+        filter_name = "Extended Kalman Filter (EKF)"
+    else:
+        raise ValueError(f"Unknown filter: {args.filter}. Use 'lkf' or 'ekf'.")
+    
+    print(f"[INFO] Using filter: {filter_name}")
+    initialized = False
+
     absscale = AbosluteScaleComputer()
 
     # Check if this is a robot dataset from config
@@ -128,8 +162,7 @@ def run(args):
         if wo:
             timestamp = loader.times[i]
             l_tick, r_tick = wo.get_interpolated_ticks(timestamp)
-            R_wo, t_wo = wo.update(l_tick, r_tick)
-
+            yaw_wo, R_wo, t_wo = wo.update(l_tick, r_tick)
 
         # 3. Visual Odometry update
         R_vo, t_vo = vo.update(img, absolute_scale=current_scale)
@@ -141,6 +174,11 @@ def run(args):
         # 4. Logging (Handling None for t_wo)
         # We use a fallback [0,0,0] if t_wo is None for consistent column count
         wo_log = t_wo if t_wo is not None else np.zeros((3, 1))
+
+        vo_data = {"R": R_vo, "t": t_vo}
+        wo_data = {"R": R_wo, "t": t_wo, "yaw": yaw_wo}
+
+        R_filtered, t_filtered = filter_obj.update(vo_data, wo_data)
 
         print(
             i,
@@ -158,7 +196,7 @@ def run(args):
 
         # 5. Visualization
         img1 = keypoints_plot(img, vo)
-        img2 = traj_plotter.update(t_vo, gt_pose[:, 3], wo_xyz=t_wo)
+        img2 = traj_plotter.update(t_vo, gt_pose[:, 3], wo_xyz=t_wo, ekf_xyz=t_filtered)
 
         cv2.imshow("keypoints", img1)
         cv2.imshow("trajectory", img2)
@@ -182,6 +220,13 @@ if __name__ == "__main__":
         "--encoder",
         action="store_true",
         help="If set, Wheel Odometry will be used.",
+    )
+    parser.add_argument(
+        "--filter",
+        type=str,
+        choices=["lkf", "ekf"],
+        default="lkf",
+        help="Filter to use: 'lkf' for Linear Kalman Filter, 'ekf' for Extended Kalman Filter",
     )
     parser.add_argument(
         "--logging",
