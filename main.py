@@ -28,7 +28,7 @@ class TrajPlotter(object):
         self.errors = []
         self.w, self.h = 800, 800
         self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
-        self.scale = 0.5 if not is_robot else 100  # Adjust scale for robot datasets
+        self.scale = 0.1 if not is_robot else 100  # Adjust scale for robot datasets
         
 
     def update(self, est_xyz, gt_xyz, wo_xyz=None, ekf_xyz=None):
@@ -140,7 +140,9 @@ def run(args):
 
     # Check if this is a robot dataset from config
     is_robot = config["dataset"].get("is_robot", False)
+    scale_factor = config["dataset"].get("scale_factor", 50)
     traj_plotter = TrajPlotter(is_robot=is_robot)
+    traj_plotter.scale = scale_factor
 
     # Initialize Wheel Odometry only if the flag is True
     wo = None
@@ -156,14 +158,19 @@ def run(args):
         gt_pose = loader.get_cur_pose()
         t_wo = None  # Default if no wheel odometry
 
-        current_scale = absscale.update(gt_pose)
-
         # 2. Wheel Odometry update
         if wo:
             timestamp = loader.times[i]
             l_tick, r_tick = wo.get_interpolated_ticks(timestamp)
             yaw_wo, R_wo, t_wo = wo.update(l_tick, r_tick)
 
+        wo_pose = np.eye(4)
+        if t_wo is not None:
+            wo_pose[:3, :3] = R_wo
+            wo_pose[:3, 3] = t_wo.flatten()
+
+        current_scale = absscale.update(wo_pose)
+        print(f"Frame {i}: Absolute Scale = {current_scale}")
         # 3. Visual Odometry update
         R_vo, t_vo = vo.update(img, absolute_scale=current_scale)
 

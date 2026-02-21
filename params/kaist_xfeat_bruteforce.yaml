@@ -3,6 +3,7 @@ dataset:
   root_path: /home/aki/Desktop/Datasets/urban27-dongtan/
   sequence: 'urban27'
   start: 0
+  scale_factor: 0.2
 
 detector:
   name: XfeatDetector

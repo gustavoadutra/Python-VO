@@ -41,7 +41,10 @@ class VisualOdometry(object):
         :return: R and t of current frame
         """
         kptdesc = self.detector(image)
-
+        if kptdesc is None:
+            print("No keypoints detected, skipping frame.")
+            self.index += 1
+            return self.cur_R, self.cur_t
         # first frame
         if self.index == 0:
             # save keypoints and descriptors
@@ -53,8 +56,12 @@ class VisualOdometry(object):
         else:
             # update keypoints and descriptors
             self.kptdescs["cur"] = kptdesc
-            matches = self.matcher(self.kptdescs)
 
+            matches = self.matcher(self.kptdescs)
+            if len(matches["cur_keypoints"]) == 0:
+                print("No matches found, skipping frame.")
+                self.index += 1
+                return self.cur_R, self.cur_t
             # compute relative R,t between ref and cur frame
             E, mask = cv2.findEssentialMat(
                 matches["cur_keypoints"],
@@ -74,7 +81,7 @@ class VisualOdometry(object):
             )
 
             # get absolute pose based on absolute_scale
-            if absolute_scale > 0.1:
+            if absolute_scale > 0:
                 self.cur_t = self.cur_t + absolute_scale * self.cur_R.dot(t)
                 self.cur_R = R.dot(self.cur_R)
 
