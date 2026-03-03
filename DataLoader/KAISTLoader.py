@@ -4,6 +4,7 @@ import logging
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Iterator
+import matplotlib.pyplot as plt
 
 from utils.PinholeCamera import PinholeCamera
 
@@ -87,14 +88,13 @@ class ComplexUrbanDatasetLoader:
         """
         Loads the image list and creates 'self.times' for synchronization.
         """
-        # Load Image Timestamps from CSV
+        # Load Image timestamps_vo from CSV
         stamp_file_path = self.sequence_path / "sensor_data/stereo_stamp.csv"
-        print(stamp_file_path.exists())
         # Lógica de Fallback
         if stamp_file_path.exists():
             # Caso 1: Arquivo CSV existe - carrega normalmente
             df_stamps = pd.read_csv(stamp_file_path, header=None)
-            self.timestamps = pd.to_numeric(df_stamps.iloc[:, 0]).values.astype(
+            self.timestamps_vo = pd.to_numeric(df_stamps.iloc[:, 0]).values.astype(
                 np.int64
             )
         else:
@@ -121,14 +121,14 @@ class ComplexUrbanDatasetLoader:
                 )
 
             # É crucial ordenar os timestamps, pois o sistema de arquivos não garante ordem
-            self.timestamps = np.array(sorted(ts_list), dtype=np.int64)
+            self.timestamps_vo = np.array(sorted(ts_list), dtype=np.int64)
 
         # === CRITICAL ADDITION FOR WHEEL ODOMETRY SYNC ===
         # Convert nanoseconds to seconds so main.py can sync with encoder.csv
-        self.times = self.timestamps / 1e9
+        self.times = self.timestamps_vo / 1e9
         # =================================================
         self.img_files = []
-        for ts in self.timestamps:
+        for ts in self.timestamps_vo:
             img_p = self.img_folder / f"{ts}.png"
             self.img_files.append(str(img_p))
 
@@ -147,29 +147,29 @@ class ComplexUrbanDatasetLoader:
             gps_df[col] = pd.to_numeric(gps_df[col])
 
         gps_data = gps_df.values
-        gps_ts_raw = gps_data[:, 0].astype(np.float64)
+        self.gps_ts_raw = gps_data[:, 0].astype(np.float64)
         gps_x_raw = gps_data[:, 3].astype(np.float64)
         gps_y_raw = gps_data[:, 4].astype(np.float64)
         gps_z_raw = gps_data[:, 5].astype(np.float64)
 
-        if len(gps_ts_raw) == 0:
+        if len(self.gps_ts_raw) == 0:
             self.gt_poses = []
             return
+        
+        target_ts = self.timestamps_vo.astype(np.float64)
 
-        target_ts = self.timestamps.astype(np.float64)
-
-        interp_x = np.interp(target_ts, gps_ts_raw, gps_x_raw)
-        interp_y = np.interp(target_ts, gps_ts_raw, gps_y_raw)
-        interp_z = np.interp(target_ts, gps_ts_raw, gps_z_raw)
+        interp_x = np.interp(target_ts, self.gps_ts_raw, gps_x_raw)
+        interp_y = np.interp(target_ts, self.gps_ts_raw, gps_y_raw)
+        interp_z = np.interp(target_ts, self.gps_ts_raw, gps_z_raw)
 
         raw_poses = []
-        for i in range(len(self.timestamps)):
+        for i in range(len(self.timestamps_vo)):
             pose = np.eye(4)
             pose[0, 3] = interp_x[i]
             pose[1, 3] = interp_z[i]
             pose[2, 3] = interp_y[i]
 
-            idx_nearest = np.argmin(np.abs(gps_ts_raw - target_ts[i]))
+            idx_nearest = np.argmin(np.abs(self.gps_ts_raw - target_ts[i]))
             row_raw = gps_data[idx_nearest]
 
             if row_raw[12] == 1:
@@ -191,9 +191,11 @@ class ComplexUrbanDatasetLoader:
 
     def get_cur_pose(self) -> np.ndarray:
         idx = self.img_id - 1
+        img_gt = np.argmin(np.abs(self.gps_ts_raw - self.timestamps_vo[idx]))
+
         if 0 <= idx < len(self.gt_poses):
-            return self.gt_poses[idx]
-        return np.eye(4)[:3, :]
+            return self.gt_poses[idx], img_gt
+        return np.eye(4)[:3, :], img_gt
 
     def __len__(self) -> int:
         return self.img_N - self.config["start"]

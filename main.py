@@ -52,10 +52,11 @@ class TrajPlotter(object):
         # Offset: Centers the start point.
         offset_x = self.w // 2
         offset_y = self.h // 2
+        draw_x = int((x * self.scale).item()) + offset_x
+        draw_y = int((z * self.scale).item()) + offset_y
 
-        draw_x, draw_y = int(x * self.scale) + offset_x, int(z * self.scale) + offset_y
-        true_x, true_y = int(gt_x * self.scale) + offset_x, int(gt_z * self.scale) + offset_y
-
+        true_x = int((gt_x * self.scale).item()) + offset_x
+        true_y = int((gt_z * self.scale).item()) + offset_y
         # Draw Visual Odometry (Green)
         cv2.circle(self.traj, (draw_x, draw_y), 1, (0, 255, 0), 1)
 
@@ -126,14 +127,9 @@ def run(args):
     # Select filter: LKF or EKF
     if args.filter == "lkf":
         filter_obj = LinearKalmanFilter(config.get("filter", {}))
-        filter_name = "Linear Kalman Filter (LKF)"
     elif args.filter == "ekf":
         filter_obj = ExtendedKalmanFilter(config.get("filter", {}))
-        filter_name = "Extended Kalman Filter (EKF)"
-    else:
-        raise ValueError(f"Unknown filter: {args.filter}. Use 'lkf' or 'ekf'.")
-    
-    print(f"[INFO] Using filter: {filter_name}")
+        
     initialized = False
 
     absscale = AbosluteScaleComputer()
@@ -155,37 +151,49 @@ def run(args):
     vo = VisualOdometry(detector, matcher, loader.cam)
 
     for i, img in enumerate(loader):
-        gt_pose = loader.get_cur_pose()
+        gt_pose, img_gt = loader.get_cur_pose()
         t_wo = None  # Default if no wheel odometry
 
         # 2. Wheel Odometry update
         if wo:
             timestamp = loader.times[i]
             l_tick, r_tick = wo.get_interpolated_ticks(timestamp)
-            yaw_wo, R_wo, t_wo = wo.update(l_tick, r_tick)
-
+            yaw_wo, R_wo, t_wo_raw = wo.update(l_tick, r_tick)
+            
+            # Correction for robot and kaist datasets
+            t_wo = np.zeros((3, 1))
+            if config["dataset"].get("is_kaist", False):
+                t_wo[0, 0] = -t_wo_raw[1]  
+                t_wo[1, 0] = t_wo_raw[0]  
+                t_wo[2, 0] = 0            
+            if config["dataset"].get("is_robot", False):
+                t_wo[0, 0] = -t_wo_raw[1] 
+                t_wo[1, 0] = -t_wo_raw[0]            
+                t_wo[2, 0] = t_wo_raw[2]  
+            
+        # Needed to create the current scale
         wo_pose = np.eye(4)
         if t_wo is not None:
             wo_pose[:3, :3] = R_wo
             wo_pose[:3, 3] = t_wo.flatten()
 
         current_scale = absscale.update(wo_pose)
-        print(f"Frame {i}: Absolute Scale = {current_scale}")
-        # 3. Visual Odometry update
-        R_vo, t_vo = vo.update(img, absolute_scale=current_scale)
 
+        # 3. Visual Odometry update
+        R_vo, t_vo = vo.update(img, absolute_scale=0.01)
+
+        # Correcting the order of gt_pose for robot datasets 
         if is_robot:
             gt_pose[0], gt_pose[1] = gt_pose[1], gt_pose[0]
-
 
         # 4. Logging (Handling None for t_wo)
         # We use a fallback [0,0,0] if t_wo is None for consistent column count
         wo_log = t_wo if t_wo is not None else np.zeros((3, 1))
-
-        vo_data = {"R": R_vo, "t": t_vo}
-        wo_data = {"R": R_wo, "t": t_wo, "yaw": yaw_wo}
-
-        R_filtered, t_filtered = filter_obj.update(vo_data, wo_data)
+        
+        if args.filter is not None:
+            R_filtered, t_filtered = filter_obj.update(t_vo, wo_log)
+        else:
+            t_filtered = None
 
         print(
             i,
@@ -232,7 +240,7 @@ if __name__ == "__main__":
         "--filter",
         type=str,
         choices=["lkf", "ekf"],
-        default="lkf",
+        default=None,
         help="Filter to use: 'lkf' for Linear Kalman Filter, 'ekf' for Extended Kalman Filter",
     )
     parser.add_argument(

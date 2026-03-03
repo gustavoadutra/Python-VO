@@ -50,14 +50,19 @@ class VisualOdometry(object):
             # save keypoints and descriptors
             self.kptdescs["cur"] = kptdesc
 
-            # start point
+            # start point  
             self.cur_R = np.identity(3)
             self.cur_t = np.zeros((3, 1))
         else:
             # update keypoints and descriptors
             self.kptdescs["cur"] = kptdesc
-
-            matches = self.matcher(self.kptdescs)
+            try:
+                matches = self.matcher(self.kptdescs)
+            except Exception as e:
+                print(f"Matcher error: {e}, skipping frame.")
+                self.index += 1
+                return self.cur_R, self.cur_t
+            
             if len(matches["cur_keypoints"]) == 0:
                 print("No matches found, skipping frame.")
                 self.index += 1
