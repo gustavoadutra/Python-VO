@@ -12,8 +12,7 @@ class ExtendedKalmanFilter:
     """
     default_config = {
         "measurement_noise_vo": 0.05,  # Covariance for VO
-        "measurement_noise_wo": 0.1,   # Covariance for WO
-        "process_noise_pos": 0.01,     # Uncertainty added per step
+        "process_noise_pos": 0.001,     # Uncertainty added per step
     }
 
     def __init__(self, config: Dict = {}):
@@ -35,33 +34,31 @@ class ExtendedKalmanFilter:
         # initial_state should be a list or array of at least 2 elements
         self.state = np.array([initial_state[0], initial_state[1]]).reshape(2, 1)
         self.P = np.eye(2) * 0.1
-        logging.info(f"Filter initialized with state: {self.state.T}")
+        logging.info(f"Filter initialized with state: {self.state.T}") 
 
-    def predict(self, dt: float, u: Optional[Tuple[float, float]] = None):
-        """
-        Prediction Step.
-        Since Theta is removed, we cannot project velocity (v) into x/z components 
-        without external orientation. 
-        
-        We assume a 'Static' or 'Constant Velocity' model where the best prediction 
-        of the next position is the current position plus process noise 
-        (unless explicit vx, vz velocities are provided).
-        """
-        # F is Identity (2x2)
-        # x_k = x_{k-1}
-        # z_k = z_{k-1}
-        F = np.eye(2)
+    def predict(self, v_wo: float, yaw_wo: float):
+        # Uses WO angular and linear velocities
+        # F is the jacobian of the 
+        F = np.array([
+                [1, 0, v_wo * np.cos(yaw_wo)], 
+                [0, 1, v_wo * np.sin(yaw_wo)],
+                [0, 0, 1]])
 
-        # 1. State Prediction
-        # If u contains (vx, vz), we could do: self.state += u * dt
-        # For now, we assume Identity transition
-        self.state = F @ self.state
+
+        # State propagation using discrete unicycle model
+        x_k = self.state[0, 0]
+        z_k = self.state[1, 0]
+
+        x_k1 = x_k + v_wo * np.cos(yaw_wo)
+        z_k1 = z_k + v_wo * np.sin(yaw_wo)
+
+        self.state = np.array([[x_k1], [z_k1]])
 
         # 2. Covariance Prediction
         # P = F * P * F.T + Q
         self.P = F @ self.P @ F.T + self.Q
 
-    def update(self, vo_data: Union[Dict, np.ndarray], wo_data: Union[Dict, np.ndarray]):
+    def update(self, vo_data: Union[Dict, np.ndarray]):
         """
         Sequentially updates state with VO and WO measurements.
         Handles both Dictionary inputs (from your main loop) or direct Arrays.
@@ -74,7 +71,6 @@ class ExtendedKalmanFilter:
             return data
 
         t_vo = extract_t(vo_data)
-        t_wo = extract_t(wo_data)
 
         # --- Update with Visual Odometry (VO) ---
         if t_vo is not None:
@@ -84,16 +80,6 @@ class ExtendedKalmanFilter:
 
             # Noise Matrix
             R_cov = np.eye(2) * self.config["measurement_noise_vo"]
-            
-            self._measurement_update(z_meas, R_cov)
-
-        # --- Update with Wheel Odometry (WO) ---
-        if t_wo is not None:
-            # Measurement vector [x, z]
-            z_meas = np.array([[t_wo[0, 0]], [t_wo[2, 0]]])
-
-            # Noise Matrix (Usually higher drift)
-            R_cov = np.eye(2) * self.config["measurement_noise_wo"]
             
             self._measurement_update(z_meas, R_cov)
 

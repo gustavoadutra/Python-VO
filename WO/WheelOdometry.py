@@ -8,13 +8,25 @@ import pandas as pd
 class WheelOdometry(object):
     """
     Wheel Odometry with KAIST CSV support and Asymmetric Wheel Calibration.
+    
+    Implements differential drive kinematics with support for:
+    - Asymmetric left/right wheel radius calibration
+    - KAIST encoder CSV loading and timestamp interpolation
+    - Pose tracking with rotation matrices and translation vectors
+    - Linear and angular velocity estimation
     """
 
     def __init__(self, config: Dict = {}):
         """
+        Initialize Wheel Odometry system.
+        
+        Loads calibration parameters from EncoderParameter.txt and encoder data from encoder.csv.
+        Falls back to default Prius approximation parameters if files are not found.
+        
         Args:
-            encoder_param_path: Path to 'EncoderParameter.txt'
-            csv_path: Path to 'encoder.csv'
+            config (Dict): Configuration dictionary with keys:
+                - 'root_path': Root directory of dataset
+                - 'sequence': Sequence identifier (e.g., 'dataset_20260126_084725')
         """
         encoder_param_path = (
             Path(config["root_path"])
@@ -57,6 +69,16 @@ class WheelOdometry(object):
     def load_calibration(self, param_file):
         """
         Parses EncoderParameter.txt to set precise calibration values.
+        
+        Reads encoder resolution, left/right wheel diameters, and wheel base from the 
+        calibration file. Automatically converts diameters to radii. Updates conversion 
+        factors after loading.
+        
+        Args:
+            param_file (str or Path): Path to EncoderParameter.txt calibration file
+            
+        Raises:
+            Exception: If file cannot be opened or parsed; falls back to default parameters
         """
         print(f"[INFO] Loading calibration from {param_file}...")
         try:
@@ -82,7 +104,15 @@ class WheelOdometry(object):
             print("[WARN] Using default parameters.")
 
     def _update_conversion_factors(self):
-        """Calculates tick-to-meter factors for each wheel."""
+        """
+        Calculates tick-to-meter conversion factors for each wheel.
+        
+        Computes the distance traveled per encoder tick for left and right wheels
+        using: conversion_factor = (2 * pi * radius) / ticks_per_revolution
+        
+        Allows asymmetric wheel calibration for left and right wheels.
+        Prints calibration parameters to console for verification.
+        """
         self.tick_to_meter_left = (2 * np.pi * self.radius_left) / self.ticks_per_rev
         self.tick_to_meter_right = (2 * np.pi * self.radius_right) / self.ticks_per_rev
 
@@ -93,7 +123,18 @@ class WheelOdometry(object):
         print(f"  - Resolution: {self.ticks_per_rev}")
 
     def load_kaist_csv(self, csv_path):
-        """Loads the encoder data CSV."""
+        """
+        Loads the encoder data CSV in KAIST format.
+        
+        Reads a CSV file with columns: timestamp (nanoseconds), left ticks, right ticks.
+        Converts timestamps from nanoseconds to seconds for internal use.
+        
+        Args:
+            csv_path (str or Path): Path to encoder.csv file with columns [timestamp, left, right]
+            
+        Raises:
+            FileNotFoundError: If CSV file does not exist at the specified path
+        """
         print(f"[INFO] Loading encoder data from: {csv_path}")
         try:
             self.df = pd.read_csv(
@@ -105,7 +146,18 @@ class WheelOdometry(object):
             raise FileNotFoundError(f"Could not find encoder file at: {csv_path}")
 
     def get_interpolated_ticks(self, target_time):
-        """Syncs ticks to image timestamp."""
+        """
+        Synchronizes encoder ticks to a specific image timestamp via linear interpolation.
+        
+        Uses binary search to find the encoder readings closest to the target timestamp,
+        then linearly interpolates between them to get ticks at the exact target time.
+        
+        Args:
+            target_time (float): Target timestamp in seconds
+            
+        Returns:
+            tuple: (left_ticks, right_ticks) interpolated at target_time
+        """
         if self.df is None:
             return 0, 0
 
@@ -129,13 +181,33 @@ class WheelOdometry(object):
         )
         return interp_left, interp_right
 
-    def update(self, left_tick, right_tick):
-        """Calculates position update using Differential Drive Kinematics."""
+    def update(self, left_tick, right_tick, dt):
+        """
+        Calculates pose update using Differential Drive Kinematics.
+        
+        Updates the internal pose state (rotation matrix, translation vector, heading angle)
+        based on wheel encoder ticks and elapsed time. Also estimates linear and angular velocities.
+        
+        Args:
+            left_tick (float): Left wheel encoder ticks count
+            right_tick (float): Right wheel encoder ticks count
+            dt (float): Time delta since last update in seconds
+            
+        Returns:
+            tuple: (cur_theta, cur_R, cur_t, w, v) where:
+                - cur_theta: Current heading angle in radians
+                - cur_R: 3x3 rotation matrix (current orientation)
+                - cur_t: 3x1 translation vector (current position)
+                - w: Angular velocity (yaw rate) in rad/s
+                - v: Linear velocity in m/s
+        """
         if self.index == 0:
             self.prev_ticks = (left_tick, right_tick)
             self.cur_R = np.identity(3)
             self.cur_t = np.zeros((3, 1))
             self.cur_theta = 0.0
+            self.v = 0.0
+            self.w = 0.0
         else:
             d_left_ticks = left_tick - self.prev_ticks[0]
             d_right_ticks = right_tick - self.prev_ticks[1]
@@ -161,6 +233,14 @@ class WheelOdometry(object):
             self.cur_t = self.cur_t + self.cur_R.dot(dt_rel)
             self.cur_R = self.cur_R.dot(dR_rel)
             self.cur_theta += d_theta
+            
+            # Linear velocity (m/s) and Angular velocity (rad/s)
+            if dt > 0:
+                self.v = dist_center / dt
+                self.w = d_theta / dt
+            else:
+                self.v = 0.0
+                self.w = 0.0
 
         self.index += 1
-        return self.cur_theta, self.cur_R, self.cur_t
+        return self.cur_theta, self.cur_R, self.cur_t, self.w, self.v, self.cur_theta

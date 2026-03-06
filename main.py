@@ -157,8 +157,9 @@ def run(args):
         # 2. Wheel Odometry update
         if wo:
             timestamp = loader.times[i]
+            timestamp_prev = loader.times[i - 1] if i > 0 else None
             l_tick, r_tick = wo.get_interpolated_ticks(timestamp)
-            yaw_wo, R_wo, t_wo_raw = wo.update(l_tick, r_tick)
+            yaw_wo, R_wo, t_wo_raw, w_wo, v_wo, yaw_wo = wo.update(l_tick, r_tick, timestamp - timestamp_prev if timestamp_prev else 0)
             
             # Correction for robot and kaist datasets
             t_wo = np.zeros((3, 1))
@@ -189,9 +190,17 @@ def run(args):
         # 4. Logging (Handling None for t_wo)
         # We use a fallback [0,0,0] if t_wo is None for consistent column count
         wo_log = t_wo if t_wo is not None else np.zeros((3, 1))
-        
+
+        # initialize filter using first measurement
+        if args.filter is not None and not initialized and t_vo is not None:
+            filter_obj.initialize([t_vo[0, 0], t_vo[2, 0]])
+            initialized = True
+
         if args.filter is not None:
-            R_filtered, t_filtered = filter_obj.update(t_vo, wo_log)
+            # run predict step before measurement update
+            if wo:
+                filter_obj.predict(v_wo, yaw_wo, dt=timestamp - timestamp_prev if timestamp_prev else 0)
+            R_filtered, t_filtered = filter_obj.update(t_vo)
         else:
             t_filtered = None
 

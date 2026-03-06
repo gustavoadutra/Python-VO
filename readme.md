@@ -13,6 +13,11 @@ For feature matchers, we tested the KNN and FLANN mathers implemented in OpenCV,
 - KNN, FLANN (OpenCV implementation)
 - [SuperGlue](https://github.com/magicleap/SuperGluePretrainedNetwork)
 
+**Odometry systems**
+- Visual Odometry (VO) from camera features
+- Wheel Odometry (WO) with asymmetric wheel calibration support
+- Sensor fusion with Linear Kalman Filter (LKF) and Extended Kalman Filter (EKF)
+
 **SIFT Keypoints**
 
 ![sift_keypoints](screenshots/sift_keypoints.png)
