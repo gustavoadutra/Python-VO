@@ -1,6 +1,6 @@
 import numpy as np
 import logging
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Union
 
 class LinearKalmanFilter:
     """
@@ -13,21 +13,20 @@ class LinearKalmanFilter:
     default_config = {
         "measurement_noise_vo": 0.05,  # Covariance for VO measurements
         "process_noise_pos": 0.001,    # Process noise for position
-        "process_noise_yaw": 0.01,     # Process noise for orientation
     }
 
     def __init__(self, config: Dict = {}):
         self.config = {**self.default_config, **config}
         logging.basicConfig(level=logging.INFO)
         
-        # State vector [x, z, yaw]
-        self.state = np.zeros((3, 1))
+        # State vector [x, z]
+        self.state = np.zeros((2, 1))
         
-        # State covariance matrix P (3x3)
-        self.P = np.eye(3)
+        # State covariance matrix P (2x2)
+        self.P = np.eye(2)
         
-        # Process noise covariance Q (3x3)
-        self.Q = np.diag([
+        # Process noise covariance Q
+        self.Q = np.array([
             self.config["process_noise_pos"],
             self.config["process_noise_pos"]
             ])
@@ -37,7 +36,7 @@ class LinearKalmanFilter:
         # initial_state should be a list or array of at least 2 elements
         self.state = np.array([initial_state[0], initial_state[1]]).reshape(2, 1)
         self.P = np.eye(2) * 0.1
-        logging.info(f"Filter initialized with state: {self.state.T}") 
+        logging.info(f"Filter initialized with state: {self.state.T}")
 
     def predict(self, v_wo: float, yaw_wo: float, dt: float):
         # v_wo is linear velocity
