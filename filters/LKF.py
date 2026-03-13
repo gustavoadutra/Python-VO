@@ -34,7 +34,7 @@ class LinearKalmanFilter:
     def initialize(self, initial_state):
         """Initializes the filter state [x, z]."""
         # initial_state should be a list or array of at least 2 elements
-        self.state = np.array([initial_state[0], initial_state[1]]).reshape(2, 1)
+        self.state = np.array([initial_state[0], initial_state[1], initial_state[2]]).reshape(2, 1)
         self.P = np.eye(2) * 0.1
         logging.info(f"Filter initialized with state: {self.state.T}")
 
@@ -67,7 +67,7 @@ class LinearKalmanFilter:
             if isinstance(data, dict):
                 return data.get("t")
             return data
-
+        print(f"VO data received for update: {vo_data}")
         t_vo = extract_t(vo_data)
 
         if t_vo is not None:

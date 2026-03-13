@@ -33,6 +33,10 @@ class VisualOdometry(object):
         self.cur_R = None
         self.cur_t = None
 
+        # relative motion and rotation for EKF update
+        self.relative_motion = None
+        self.relative_rotation = None
+
     def update(self, image, absolute_scale=1.0):
         """
         update a new image to visual odometry, and compute the pose
@@ -44,7 +48,9 @@ class VisualOdometry(object):
         if kptdesc is None:
             print("No keypoints detected, skipping frame.")
             self.index += 1
-            return self.cur_R, self.cur_t
+            # If no keypoints are detected return the last known pose
+            # it will be the last position for cur_t 
+            return self.cur_R, self.cur_t, self.relative_motion, self.relative_rotation
         # first frame
         if self.index == 0:
             # save keypoints and descriptors
@@ -86,14 +92,21 @@ class VisualOdometry(object):
             )
 
             # get absolute pose based on absolute_scale
+            # cur_r represents the rotation from the last frame to the current frame
+            # you need to apply it to the translation vector to get the correct direction of movement
+            # the translation vector t is in the camera coordinate system
             if absolute_scale > 0:
                 self.cur_t = self.cur_t + absolute_scale * self.cur_R.dot(t)
                 self.cur_R = R.dot(self.cur_R)
+                
+                # doesn't accumulate error in the same way as absolute pose
+                self.relative_motion = absolute_scale * self.cur_R.dot(t)
+                self.relative_rotation = R
 
         self.kptdescs["ref"] = self.kptdescs["cur"]
 
         self.index += 1
-        return self.cur_R, self.cur_t
+        return self.cur_R, self.cur_t, self.relative_motion, self.relative_rotation
 
 
 class AbosluteScaleComputer(object):

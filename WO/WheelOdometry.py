@@ -232,6 +232,7 @@ class WheelOdometry(object):
 
             self.cur_t = self.cur_t + self.cur_R.dot(dt_rel)
             self.cur_R = self.cur_R.dot(dR_rel)
+            # Updates yaw angle
             self.cur_theta += d_theta
             
             # Linear velocity (m/s) and Angular velocity (rad/s)
@@ -243,4 +244,4 @@ class WheelOdometry(object):
                 self.w = 0.0
 
         self.index += 1
-        return self.cur_theta, self.cur_R, self.cur_t, self.w, self.v, self.cur_theta
+        return self.cur_theta, self.cur_R, self.cur_t, self.w, self.v

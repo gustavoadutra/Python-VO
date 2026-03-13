@@ -125,9 +125,9 @@ def run(args):
     matcher = create_matcher(config["matcher"])
     
     # Select filter: LKF or EKF
-    if args.filter == "lkf":
-        filter_obj = LinearKalmanFilter(config.get("filter", {}))
-    elif args.filter == "ekf":
+    #if args.filter == "lkf":
+        #filter_obj = LinearKalmanFilter(config.get("filter", {}))
+    if args.filter == "ekf":
         filter_obj = ExtendedKalmanFilter(config.get("filter", {}))
         
     initialized = False
@@ -159,7 +159,7 @@ def run(args):
             timestamp = loader.times[i]
             timestamp_prev = loader.times[i - 1] if i > 0 else None
             l_tick, r_tick = wo.get_interpolated_ticks(timestamp)
-            yaw_wo, R_wo, t_wo_raw, w_wo, v_wo, yaw_wo = wo.update(l_tick, r_tick, timestamp - timestamp_prev if timestamp_prev else 0)
+            yaw_wo, R_wo, t_wo_raw, w_wo, v_wo = wo.update(l_tick, r_tick, timestamp - timestamp_prev if timestamp_prev else 0)
             
             # Correction for robot and kaist datasets
             t_wo = np.zeros((3, 1))
@@ -181,7 +181,10 @@ def run(args):
         current_scale = absscale.update(wo_pose)
 
         # 3. Visual Odometry update
-        R_vo, t_vo = vo.update(img, absolute_scale=0.01)
+        if is_robot:
+            R_vo, t_vo, rm_vo, rr_vo = vo.update(img, absolute_scale=0.01)
+        else:
+            R_vo, t_vo, rm_vo, rr_vo = vo.update(img, absolute_scale=current_scale)
 
         # Correcting the order of gt_pose for robot datasets 
         if is_robot:
@@ -193,7 +196,7 @@ def run(args):
 
         # initialize filter using first measurement
         if args.filter is not None and not initialized and t_vo is not None:
-            filter_obj.initialize([t_vo[0, 0], t_vo[2, 0]])
+            filter_obj.initialize()
             initialized = True
 
         if args.filter is not None:
