@@ -1,79 +1,73 @@
-# based on: https://github.com/uoip/monoVO-python
-
 import numpy as np
 import cv2
 
-
 class VisualOdometry(object):
     """
-    A simple frame by frame visual odometry
+    A robust frame-by-frame monocular visual odometry.
+    Handles frames with no keypoints or matching failures gracefully.
     """
 
     def __init__(self, detector, matcher, cam):
         """
-        :param detector: a feature detector can detect keypoints their descriptors
-        :param matcher: a keypoints matcher matching keypoints between two frames
-        :param cam: camera parameters
+        :param detector: a feature detector (e.g., SIFT, ORB)
+        :param matcher: a keypoints matcher (e.g., FLANN, BF)
+        :param cam: camera parameters object with fx, fy, cx, cy
         """
-        # feature detector and keypoints matcher
         self.detector = detector
         self.matcher = matcher
 
-        # camera parameters
+        # Camera parameters
         self.focal = cam.fx
         self.pp = (cam.cx, cam.cy)
 
-        # frame index counter
+        # Counters and Data
         self.index = 0
+        self.kptdescs = {} # Stores "cur" and "ref"
 
-        # keypoints and descriptors
-        self.kptdescs = {}
+        # State (Absolute Pose)
+        self.cur_R = np.eye(3)
+        self.cur_t = np.zeros((3, 1))
 
-        # pose of current frame
-        self.cur_R = None
-        self.cur_t = None
-
-        # relative motion and rotation for EKF update
-        self.relative_motion = None
-        self.relative_rotation = None
+        # Relative motion for EKF/External use
+        self.relative_motion = np.zeros((3, 1))
+        self.relative_rotation = np.eye(3)
 
     def update(self, image, absolute_scale=1.0):
         """
-        update a new image to visual odometry, and compute the pose
-        :param image: input image
-        :param absolute_scale: the absolute scale between current frame and last frame
-        :return: R and t of current frame
+        Update with a new image and compute the pose.
+        :param image: input BGR/Gray image
+        :param absolute_scale: ground truth scale for monocular VO
         """
+        # 1. Feature Detection
         kptdesc = self.detector(image)
+        
+        # Ensure 'cur' key exists for external plotting/logging even on failure
         if kptdesc is None:
-            print("No keypoints detected, skipping frame.")
-            self.index += 1
-            # If no keypoints are detected return the last known pose
-            # it will be the last position for cur_t 
-            return self.cur_R, self.cur_t, self.relative_motion, self.relative_rotation
-        # first frame
-        if self.index == 0:
-            # save keypoints and descriptors
+            self.kptdescs["cur"] = {"keypoints": [], "descriptors": [], "scores": []}
+        else:
             self.kptdescs["cur"] = kptdesc
 
-            # start point  
-            self.cur_R = np.identity(3)
-            self.cur_t = np.zeros((3, 1))
-        else:
-            # update keypoints and descriptors
-            self.kptdescs["cur"] = kptdesc
-            try:
-                matches = self.matcher(self.kptdescs)
-            except Exception as e:
-                print(f"Matcher error: {e}, skipping frame.")
-                self.index += 1
-                return self.cur_R, self.cur_t
+        # 2. Safety Check: If no keypoints found, skip this frame
+        if kptdesc is None or len(kptdesc.get("keypoints", [])) < 8:
+            print(f"Frame {self.index}: Too few keypoints. Skipping.")
+            self.index += 1
+            return self.cur_R, self.cur_t, self.relative_motion, self.relative_rotation
+
+        # 3. Initialization: First successful frame becomes the first reference
+        if self.index == 0 or "ref" not in self.kptdescs:
+            self.kptdescs["ref"] = self.kptdescs["cur"]
+            self.index += 1
+            return self.cur_R, self.cur_t, None, None
+
+        # 4. Feature Matching
+        try:
+            matches = self.matcher(self.kptdescs)
             
-            if len(matches["cur_keypoints"]) == 0:
-                print("No matches found, skipping frame.")
-                self.index += 1
-                return self.cur_R, self.cur_t
-            # compute relative R,t between ref and cur frame
+            # Ensure we have enough matches for the Essential Matrix (5-point min, 8-point rec)
+            if matches is None or len(matches.get("cur_keypoints", [])) < 8:
+                raise ValueError("Not enough matches between frames")
+
+            # 5. Essential Matrix & Pose Recovery
             E, mask = cv2.findEssentialMat(
                 matches["cur_keypoints"],
                 matches["ref_keypoints"],
@@ -83,6 +77,10 @@ class VisualOdometry(object):
                 prob=0.999,
                 threshold=1.0,
             )
+            
+            if E is None or E.shape != (3, 3):
+                raise ValueError("Essential Matrix calculation failed")
+
             _, R, t, mask = cv2.recoverPose(
                 E,
                 matches["cur_keypoints"],
@@ -91,23 +89,28 @@ class VisualOdometry(object):
                 pp=self.pp,
             )
 
-            # get absolute pose based on absolute_scale
-            # cur_r represents the rotation from the last frame to the current frame
-            # you need to apply it to the translation vector to get the correct direction of movement
-            # the translation vector t is in the camera coordinate system
+            # 6. Accumulate Pose
+            # Scale is applied to the translation vector t (unit vector) 
+            # rotated by current orientation
             if absolute_scale > 0:
-                self.cur_t = self.cur_t + absolute_scale * self.cur_R.dot(t)
-                self.cur_R = R.dot(self.cur_R)
-                
-                # doesn't accumulate error in the same way as absolute pose
                 self.relative_motion = absolute_scale * self.cur_R.dot(t)
                 self.relative_rotation = R
+                
+                self.cur_t = self.cur_t + self.relative_motion
+                self.cur_R = R.dot(self.cur_R)
 
-        self.kptdescs["ref"] = self.kptdescs["cur"]
+            # 7. Success! Update reference for the next frame
+            self.kptdescs["ref"] = self.kptdescs["cur"]
+
+        except Exception as e:
+            # Handle Matcher/OpenCV errors (like the 'index out of range' error)
+            print(f"Frame {self.index} Error: {e}. Attempting reset.")
+            # We set this current frame as the new reference so the NEXT frame 
+            # can try to match against it (Resetting the baseline)
+            self.kptdescs["ref"] = self.kptdescs["cur"]
 
         self.index += 1
         return self.cur_R, self.cur_t, self.relative_motion, self.relative_rotation
-
 
 class AbosluteScaleComputer(object):
     def __init__(self):
@@ -117,34 +120,16 @@ class AbosluteScaleComputer(object):
 
     def update(self, pose):
         self.cur_pose = pose
-
         scale = 1.0
-        if self.count != 0:
+        
+        if self.count != 0 and self.prev_pose is not None:
+            # Distance formula between previous and current GT position
             scale = np.sqrt(
-                (self.cur_pose[0, 3] - self.prev_pose[0, 3])
-                * (self.cur_pose[0, 3] - self.prev_pose[0, 3])
-                + (self.cur_pose[1, 3] - self.prev_pose[1, 3])
-                * (self.cur_pose[1, 3] - self.prev_pose[1, 3])
-                + (self.cur_pose[2, 3] - self.prev_pose[2, 3])
-                * (self.cur_pose[2, 3] - self.prev_pose[2, 3])
+                (self.cur_pose[0, 3] - self.prev_pose[0, 3])**2 +
+                (self.cur_pose[1, 3] - self.prev_pose[1, 3])**2 +
+                (self.cur_pose[2, 3] - self.prev_pose[2, 3])**2
             )
 
         self.count += 1
         self.prev_pose = self.cur_pose
         return scale
-
-
-if __name__ == "__main__":
-    from DataLoader.KITTILoader import KITTILoader
-    from Detectors.HandcraftDetector import HandcraftDetector
-    from Matchers.FrameByFrameMatcher import FrameByFrameMatcher
-
-    loader = KITTILoader()
-    detector = HandcraftDetector({"type": "SIFT"})
-    matcher = FrameByFrameMatcher({"type": "FLANN"})
-    absscale = AbosluteScaleComputer()
-
-    vo = VisualOdometry(detector, matcher, loader.cam)
-    for i, img in enumerate(loader):
-        gt_pose = loader.get_cur_pose()
-        R, t = vo.update(img, absscale.update(gt_pose))

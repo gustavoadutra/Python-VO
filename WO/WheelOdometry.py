@@ -28,13 +28,17 @@ class WheelOdometry(object):
                 - 'root_path': Root directory of dataset
                 - 'sequence': Sequence identifier (e.g., 'dataset_20260126_084725')
         """
+        """
         encoder_param_path = (
             Path(config["root_path"])
             / config["sequence"]
             / "calibration"
             / "EncoderParameter.txt"
         )
-        print(encoder_param_path)
+        """
+        encoder_param_path = None  # Set to None to skip loading calibration file (use defaults)
+
+
         csv_path = (
             Path(config["root_path"])
             / config["sequence"]
@@ -43,10 +47,10 @@ class WheelOdometry(object):
         )
 
         # Default Parameters (Prius approximations) if file not found
-        self.ticks_per_rev = 4096.0
-        self.radius_left = 0.311
-        self.radius_right = 0.311
-        self.base_line = 1.52
+        self.ticks_per_rev = 980
+        self.radius_left = 0.06
+        self.radius_right = 0.06
+        self.base_line = 0.335
 
         # If parameter file is provided, load it immediately
         if encoder_param_path:
@@ -181,17 +185,112 @@ class WheelOdometry(object):
         )
         return interp_left, interp_right
 
-    def update(self, left_tick, right_tick, dt):
+    def get_tick_deltas(self, t1, t2):
+        """
+        Calculates proper tick differences between two timestamps using raw sensor data.
+        
+        This method solves the interpolation-error problem by:
+        1. Finding all raw encoder readings strictly between t1 and t2
+        2. Summing their actual tick differences (preserves true increments)
+        3. Interpolating only the fractional parts at the boundaries
+        
+        This is more accurate than interpolating absolute values independently
+        and then differencing them, which causes errors to compound (especially
+        problematic for turning angle calculations).
+        
+        Args:
+            t1 (float): Start timestamp in seconds
+            t2 (float): End timestamp in seconds
+            
+        Returns:
+            tuple: (delta_left_ticks, delta_right_ticks) between t1 and t2
+        """
+        if self.df is None:
+            return 0, 0
+        
+        if t1 >= t2:
+            return 0, 0
+        
+        # Find encoder samples in the time window [t1, t2]
+        idx_start = np.searchsorted(self.df["timestamp"], t1, side='right')
+        idx_end = np.searchsorted(self.df["timestamp"], t2, side='left')
+        
+        d_left = 0.0
+        d_right = 0.0
+        
+        # Get interpolated values at t1 (to establish baseline)
+        left_at_t1, right_at_t1 = self.get_interpolated_ticks(t1)
+        
+        # Sum all intermediate encoder readings
+        if idx_start < len(self.df) and idx_start <= idx_end:
+            # Add delta from t1 to first encoder sample at idx_start
+            if idx_start > 0:
+                row_at_t1_lower = self.df.iloc[idx_start - 1]
+                row_at_t1_upper = self.df.iloc[idx_start]
+                
+                # Interpolate the first full reading to get exact tick value at t1 boundary
+                t_lower = row_at_t1_lower["timestamp"]
+                t_upper = row_at_t1_upper["timestamp"]
+                
+                if t_upper > t_lower:
+                    alpha = (t1 - t_lower) / (t_upper - t_lower)
+                    left_boundary = row_at_t1_lower["left"] + alpha * (row_at_t1_upper["left"] - row_at_t1_lower["left"])
+                    right_boundary = row_at_t1_lower["right"] + alpha * (row_at_t1_upper["right"] - row_at_t1_lower["right"])
+                else:
+                    left_boundary = row_at_t1_lower["left"]
+                    right_boundary = row_at_t1_lower["right"]
+                
+                # Delta from interpolated t1 to first real encoder sample
+                d_left += row_at_t1_upper["left"] - left_boundary
+                d_right += row_at_t1_upper["right"] - right_boundary
+            
+            # Sum all complete intermediate readings
+            if idx_start < idx_end:
+                for i in range(idx_start, idx_end):
+                    d_left += self.df.iloc[i + 1]["left"] - self.df.iloc[i]["left"]
+                    d_right += self.df.iloc[i + 1]["right"] - self.df.iloc[i]["right"]
+            
+            # Add delta from last encoder sample to t2
+            if idx_end < len(self.df):
+                row_at_t2_lower = self.df.iloc[idx_end]
+                if idx_end + 1 < len(self.df):
+                    row_at_t2_upper = self.df.iloc[idx_end + 1]
+                    t_lower = row_at_t2_lower["timestamp"]
+                    t_upper = row_at_t2_upper["timestamp"]
+                    
+                    if t_upper > t_lower:
+                        alpha = (t2 - t_lower) / (t_upper - t_lower)
+                        left_boundary = row_at_t2_lower["left"] + alpha * (row_at_t2_upper["left"] - row_at_t2_lower["left"])
+                        right_boundary = row_at_t2_lower["right"] + alpha * (row_at_t2_upper["right"] - row_at_t2_lower["right"])
+                    else:
+                        left_boundary = row_at_t2_lower["left"]
+                        right_boundary = row_at_t2_lower["right"]
+                    
+                    d_left += left_boundary - row_at_t2_lower["left"]
+                    d_right += right_boundary - row_at_t2_lower["right"]
+        
+        return d_left, d_right
+
+    def update(self, left_tick=None, right_tick=None, dt=None, prev_timestamp=None, cur_timestamp=None):
         """
         Calculates pose update using Differential Drive Kinematics.
         
-        Updates the internal pose state (rotation matrix, translation vector, heading angle)
-        based on wheel encoder ticks and elapsed time. Also estimates linear and angular velocities.
+        Supports two input modes:
+        
+        Mode 1 (Legacy): Absolute tick counts
+            update(left_tick=100, right_tick=105, dt=0.05)
+            
+        Mode 2 (NEW - Recommended): Timestamps with proper interpolation
+            update(prev_timestamp=10.5, cur_timestamp=10.6)
+            Automatically calculates proper tick deltas from raw encoder data,
+            avoiding interpolation errors in turning calculations.
         
         Args:
-            left_tick (float): Left wheel encoder ticks count
-            right_tick (float): Right wheel encoder ticks count
-            dt (float): Time delta since last update in seconds
+            left_tick (float, optional): Left wheel encoder ticks (Mode 1)
+            right_tick (float, optional): Right wheel encoder ticks (Mode 1)
+            dt (float, optional): Time delta since last update in seconds (Mode 1)
+            prev_timestamp (float, optional): Previous frame timestamp in seconds (Mode 2)
+            cur_timestamp (float, optional): Current frame timestamp in seconds (Mode 2)
             
         Returns:
             tuple: (cur_theta, cur_R, cur_t, w, v) where:
@@ -201,18 +300,42 @@ class WheelOdometry(object):
                 - w: Angular velocity (yaw rate) in rad/s
                 - v: Linear velocity in m/s
         """
+        # Mode 2: Timestamp-based (new, recommended)
+        if prev_timestamp is not None and cur_timestamp is not None:
+            dt = cur_timestamp - prev_timestamp
+            if dt <= 0:
+                self.v = 0.0
+                self.w = 0.0
+                return self.cur_theta, self.cur_R, self.cur_t, self.w, self.v
+            
+            # Get proper tick deltas from raw encoder data (solves interpolation errors)
+            d_left_ticks, d_right_ticks = self.get_tick_deltas(prev_timestamp, cur_timestamp)
+        
+        # Mode 1: Legacy absolute tick input
+        elif left_tick is not None and right_tick is not None and dt is not None:
+            if self.index == 0:
+                self.prev_ticks = (left_tick, right_tick)
+                d_left_ticks = 0.0
+                d_right_ticks = 0.0
+            else:
+                d_left_ticks = left_tick - self.prev_ticks[0]
+                d_right_ticks = right_tick - self.prev_ticks[1]
+                self.prev_ticks = (left_tick, right_tick)
+        else:
+            raise ValueError(
+                "Must provide either:\n"
+                "  - Mode 1 (legacy): left_tick, right_tick, dt\n"
+                "  - Mode 2 (recommended): prev_timestamp, cur_timestamp"
+            )
+        
+        # Handle first frame
         if self.index == 0:
-            self.prev_ticks = (left_tick, right_tick)
             self.cur_R = np.identity(3)
             self.cur_t = np.zeros((3, 1))
             self.cur_theta = 0.0
             self.v = 0.0
             self.w = 0.0
         else:
-            d_left_ticks = left_tick - self.prev_ticks[0]
-            d_right_ticks = right_tick - self.prev_ticks[1]
-            self.prev_ticks = (left_tick, right_tick)
-
             # Use asymmetric conversion factors
             d_left = d_left_ticks * self.tick_to_meter_left
             d_right = d_right_ticks * self.tick_to_meter_right
