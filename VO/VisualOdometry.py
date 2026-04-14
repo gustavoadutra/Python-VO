@@ -112,7 +112,7 @@ class VisualOdometry(object):
         self.index += 1
         return self.cur_R, self.cur_t, self.relative_motion, self.relative_rotation
 
-class AbosluteScaleComputer(object):
+class AbsoluteScaleComputer(object):
     def __init__(self):
         self.prev_pose = None
         self.cur_pose = None

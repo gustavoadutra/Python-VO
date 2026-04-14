@@ -7,13 +7,13 @@ import os
 import csv
 
 from utils.tools import plot_keypoints
+from utils.RSTPHandler import RSTPHandler
 
 from DataLoader import create_dataloader
 from Detectors import create_detector
 from Matchers import create_matcher
-from VO.VisualOdometry import VisualOdometry, AbosluteScaleComputer
+from VO.VisualOdometry import VisualOdometry, AbsoluteScaleComputer
 from WO.WheelOdometry import WheelOdometry
-from filters.LKF import LinearKalmanFilter
 from filters.EKF_PW_UV import ExtendedKalmanFilter
 
 
@@ -246,13 +246,13 @@ def run(args):
     detector = create_detector(config["detector"])
     matcher = create_matcher(config["matcher"])
     
-    # Select filter: LKF or EKF
+    # Select filter EKF
     if args.filter == "ekf":
         filter_obj = ExtendedKalmanFilter(config.get("filter", {}))
         
     initialized = False
 
-    absscale = AbosluteScaleComputer()
+    absscale = AbsoluteScaleComputer()
 
     # Check if this is a robot dataset from config
     is_robot = config["dataset"].get("is_robot", False)
@@ -269,45 +269,10 @@ def run(args):
     
     vo = VisualOdometry(detector, matcher, loader.cam)
 
-    # ========================================================
-    # INDEX RTSP IMAGES BEFORE THE LOOP
-    # ========================================================
-    dataroot = config["dataset"].get("root_path", "") + config["dataset"].get("sequence", "")
-    rtsp_dir = os.path.join(dataroot, "rtsp_images_fixed")
-    available_rtsp_timestamps = []
-
-    if os.path.exists(rtsp_dir):
-        print(f"[INFO] Indexing RTSP images from: {rtsp_dir}")
-        for file in os.listdir(rtsp_dir):
-            if file.endswith(".png"):
-                try:
-                    # Extract the nanosecond integer from the filename
-                    ts = int(file.replace(".png", ""))
-                    available_rtsp_timestamps.append(ts)
-                except ValueError:
-                    continue
-        available_rtsp_timestamps.sort()
-        print(f"[INFO] Found {len(available_rtsp_timestamps)} RTSP images.")
-    else:
-        print(f"[WARNING] RTSP directory not found at {rtsp_dir}")
-
-    # ========================================================
-    # SETUP RTSP CAMERA CALIBRATION (For Display Only)
-    # ========================================================
-    print("[INFO] Initializing RTSP Camera Calibration Maps...")
-    rtsp_w, rtsp_h = 1920, 1080  # Real resolution of the RTSP camera
-
-    K_raw = np.array([
-        [1078.79585,           0.0,  988.796493],
-        [         0.0, 1085.59661,  547.254318],
-        [         0.0,           0.0,           1.0]
-    ], dtype=np.float64)
-
-    D_raw = np.array([-0.27300998, 0.0579501, 0.0, 0.0, 0.0], dtype=np.float64)
-
-    # alpha=0 crops out the black borders caused by undistorting barrel distortion
-    K_new, _ = cv2.getOptimalNewCameraMatrix(K_raw, D_raw, (rtsp_w, rtsp_h), 0, (rtsp_w, rtsp_h))
-    map1, map2 = cv2.initUndistortRectifyMap(K_raw, D_raw, None, K_new, (rtsp_w, rtsp_h), cv2.CV_32FC1)
+    # INITIALIZE RTSP HANDLER (only if --rtsp flag is set)
+    rtsp_handler = None
+    if args.rtsp:
+        rtsp_handler = RSTPHandler(config)
 
     # ========================================================
     # MAIN LOOP
@@ -405,44 +370,14 @@ def run(args):
         cv2.imshow("keypoints", img1)
         cv2.imshow("trajectory", img2)
 
-        # ========================================================
         # MATCH AND DISPLAY RTSP IMAGE
-        # ========================================================
-        if available_rtsp_timestamps:
-            # 1. Parse the timestamp as a float first
-            raw_ts = float(timestamp)
+        if rtsp_handler is not None and rtsp_handler.has_rtsp_images():
+            rtsp_display, diff_ms, closest_ts = rtsp_handler.get_rtsp_image(timestamp)
             
-            # 2. Fix the scale (Seconds vs Nanoseconds)
-            # If raw_ts is ~1.7e9, it's in seconds. If it's > 1e18, it's in nanoseconds.
-            if raw_ts < 1e12: 
-                target_ts = int(raw_ts * 1e9) # Convert seconds to nanoseconds
-            else:
-                target_ts = int(raw_ts)       # Already in nanoseconds
-
-            # 3. Find the closest RTSP timestamp mathematically
-            closest_ts = min(available_rtsp_timestamps, key=lambda x: abs(x - target_ts))
-            rtsp_path = os.path.join(rtsp_dir, f"{closest_ts}.png")
-
-            if os.path.exists(rtsp_path):
-                rtsp_img = cv2.imread(rtsp_path)
-                if rtsp_img is not None:
-                    
-                    # --- NEW: Apply calibration transformation ---
-                    rtsp_rectified = cv2.remap(rtsp_img, map1, map2, cv2.INTER_LINEAR)
-
-                    # Resize the FIXED image to fit the screen
-                    rtsp_display = cv2.resize(rtsp_rectified, (640, 360))
-                    
-                    # Calculate time difference in milliseconds for debugging
-                    diff_ms = abs(closest_ts - target_ts) / 1e6
-                    
-                    # Draw the sync difference on the image
-                    text = f"Sync Diff: {diff_ms:.2f} ms"
-                    color = (0, 255, 0) if diff_ms < 50 else (0, 0, 255) # Green if < 50ms, Red if out of sync
-                    cv2.putText(rtsp_display, text, (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 4) # Black border
-                    cv2.putText(rtsp_display, text, (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)     # Colored text
-
-                    cv2.imshow("RTSP (Ground Truth Camera)", rtsp_display)
+            if rtsp_display is not None:
+                # Draw synchronization info
+                rtsp_display = rtsp_handler.draw_sync_info(rtsp_display, diff_ms)
+                cv2.imshow("RTSP (Ground Truth Camera)", rtsp_display)
 
         if cv2.waitKey(10) == 27:
             break
@@ -463,7 +398,6 @@ if __name__ == "__main__":
         default="params/kitti_superpoint_supergluematch.yaml",
         help="config file",
     )
-    # Changed to optional flags (store_true)
     parser.add_argument(
         "--encoder",
         action="store_true",
@@ -472,9 +406,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--filter",
         type=str,
-        choices=["lkf", "ekf"],
+        choices=["ekf"],
         default=None,
         help="Filter to use: 'lkf' for Linear Kalman Filter, 'ekf' for Extended Kalman Filter",
+    )
+    parser.add_argument(
+        "--rtsp",
+        action="store_true",
+        help="If set, RTSP images will be displayed.",
     )
     parser.add_argument(
         "--logging",

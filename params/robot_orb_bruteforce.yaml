@@ -2,7 +2,7 @@ dataset:
   name: ComplexUrbanDatasetLoader
   root_path: /home/aki/Desktop/old_cuscobot/
   #root_path: test_imgs
-  sequence: dataset_20260126_105418/
+  sequence: dataset_20260321_115430/
   start: 0
   is_robot: True
 
@@ -28,7 +28,5 @@ matcher:
   distance_ratio: 0.75
 
 ekf:
-  measurement_noise_vo: 0.05
-  measurement_noise_wo: 0.1
   measurement_noise_vo: 0.05   # Lower = trust VO more
-  measurement_noise_wo: 0.1    # Higher = trust WO l
+  measurement_noise_wo: 0.1    # Higher = trust WO more
