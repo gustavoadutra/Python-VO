@@ -26,7 +26,7 @@ def keypoints_plot(img, vo):
 
 
 class TrajPlotter(object):
-    def __init__(self, is_robot=False):
+    def __init__(self, width=800, height=800, is_robot=False):
         self.errors = []
         self.vo_errors = []
         self.wo_errors = []
@@ -36,11 +36,12 @@ class TrajPlotter(object):
         self.ekf_positions = []
         self.gt_positions = []
         self.is_robot = is_robot
-        self.w, self.h = 800, 800
+        self.w, self.h = width, height
+        self.offset_x = self.w // 2
+        self.offset_y = self.h // 2
         self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
         self.scale = 0.1 if not is_robot else 200  # Adjust scale for robot datasets
         
-
     def update(self, est_xyz, gt_xyz, wo_xyz=None, ekf_xyz=None):
         """
         Updates the trajectory plot.
@@ -52,6 +53,7 @@ class TrajPlotter(object):
         x, z = est_xyz[0], est_xyz[2]
         gt_x, gt_z = gt_xyz[0], gt_xyz[2]
 
+        # Creates 2D points for error calculation
         est = np.array([x, z]).reshape(2)
         gt = np.array([gt_x, gt_z]).reshape(2)
 
@@ -59,6 +61,7 @@ class TrajPlotter(object):
         vo_error = np.linalg.norm(est - gt)
         self.errors.append(vo_error)
         self.vo_errors.append(vo_error)
+
         # Convert to scalars to ensure consistent dimensions
         self.vo_positions.append([float(np.asarray(x).flat[0]), float(np.asarray(z).flat[0])])
         self.gt_positions.append([float(np.asarray(gt_x).flat[0]), float(np.asarray(gt_z).flat[0])])
@@ -83,14 +86,11 @@ class TrajPlotter(object):
             self.ekf_positions.append([float(np.asarray(ekf_xyz[0]).flat[0]), float(np.asarray(ekf_xyz[2]).flat[0])])
             avg_ekf_error = np.mean(np.array(self.ekf_errors))
 
-        # Offset: Centers the start point.
-        offset_x = self.w // 2
-        offset_y = self.h // 2
-        draw_x = int((x * self.scale).item()) + offset_x
-        draw_y = int((z * self.scale).item()) + offset_y
+        draw_x = int((x * self.scale).item()) + self.offset_x
+        draw_y = int((z * self.scale).item()) + self.offset_y
 
-        true_x = int((gt_x * self.scale).item()) + offset_x
-        true_y = int((gt_z * self.scale).item()) + offset_y
+        true_x = int((gt_x * self.scale).item()) + self.offset_x
+        true_y = int((gt_z * self.scale).item()) + self.offset_y
         
         # Draw Visual Odometry (Green)
         cv2.circle(self.traj, (draw_x, draw_y), 1, (0, 255, 0), 1)
@@ -101,15 +101,15 @@ class TrajPlotter(object):
         # Draw Wheel Odometry (Blue) - if available
         if wo_xyz is not None:
             wo_x, wo_z = (
-                int(wo_xyz[0] * self.scale) + offset_x,
-                int(wo_xyz[1] * self.scale) + offset_y,
+                int(float(wo_xyz[0]) * self.scale) + self.offset_x,
+                int(float(wo_xyz[1]) * self.scale) + self.offset_y,
             )
             cv2.circle(self.traj, (wo_x, wo_z), 1, (255, 0, 0), 1)
 
         if ekf_xyz is not None:
             ekf_x, ekf_z = (
-                int(ekf_xyz[0] * self.scale) + offset_x,
-                int(ekf_xyz[2] * self.scale) + offset_y,
+                int(float(ekf_xyz[0]) * self.scale) + self.offset_x,
+                int(float(ekf_xyz[2]) * self.scale) + self.offset_y,
             )
             cv2.circle(self.traj, (ekf_x, ekf_z), 1, (255, 255, 0), 1)
 
@@ -118,15 +118,13 @@ class TrajPlotter(object):
         if len(self.vo_errors) > 1:
             prev_vo = self.vo_positions[-2]
             curr_vo = self.vo_positions[-1]
-            prev_gt = self.gt_positions[-2]
-            curr_gt = self.gt_positions[-1]
             
             # Draw line from VO to GT (error vector)
             cv2.line(self.traj, 
-                    (int(prev_vo[0] * self.scale) + offset_x, 
-                     int(prev_vo[1] * self.scale) + offset_y),
-                    (int(curr_vo[0] * self.scale) + offset_x, 
-                     int(curr_vo[1] * self.scale) + offset_y),
+                    (int(prev_vo[0] * self.scale) + self.offset_x, 
+                     int(prev_vo[1] * self.scale) + self.offset_y),
+                    (int(curr_vo[0] * self.scale) + self.offset_x, 
+                     int(curr_vo[1] * self.scale) + self.offset_y),
                     (50, 200, 50), 1)  # Darker green for error trajectory
 
         # WO Error trajectory (Blue dotted)
@@ -134,10 +132,10 @@ class TrajPlotter(object):
             prev_wo = self.wo_positions[-2]
             curr_wo = self.wo_positions[-1]
             cv2.line(self.traj,
-                    (int(prev_wo[0] * self.scale) + offset_x,
-                     int(prev_wo[1] * self.scale) + offset_y),
-                    (int(curr_wo[0] * self.scale) + offset_x,
-                     int(curr_wo[1] * self.scale) + offset_y),
+                    (int(prev_wo[0] * self.scale) + self.offset_x,
+                     int(prev_wo[1] * self.scale) + self.offset_y),
+                    (int(curr_wo[0] * self.scale) + self.offset_x,
+                     int(curr_wo[1] * self.scale) + self.offset_y),
                     (150, 100, 50), 1)  # Darker blue for error trajectory
 
         # EKF Error trajectory (Yellow dotted)
@@ -145,10 +143,10 @@ class TrajPlotter(object):
             prev_ekf = self.ekf_positions[-2]
             curr_ekf = self.ekf_positions[-1]
             cv2.line(self.traj,
-                    (int(prev_ekf[0] * self.scale) + offset_x,
-                     int(prev_ekf[1] * self.scale) + offset_y),
-                    (int(curr_ekf[0] * self.scale) + offset_x,
-                     int(curr_ekf[1] * self.scale) + offset_y),
+                    (int(prev_ekf[0] * self.scale) + self.offset_x,
+                     int(prev_ekf[1] * self.scale) + self.offset_y),
+                    (int(curr_ekf[0] * self.scale) + self.offset_x,
+                     int(curr_ekf[1] * self.scale) + self.offset_y),
                     (150, 150, 100), 1)  # Darker cyan for error trajectory
 
         # Legend and Text
@@ -239,26 +237,33 @@ class TrajPlotter(object):
 
 
 def run(args):
+    # Initialize variables for Wheel Odometry
+    yaw_wo = 0.0
+    t_wo = np.zeros((3, 1))
+    wo_pose = np.eye(4)
+
     with open(args.config, "r") as f:
         config = yaml.load(f, yaml.Loader)
+
+    absscale = AbsoluteScaleComputer()
 
     loader = create_dataloader(config["dataset"])
     detector = create_detector(config["detector"])
     matcher = create_matcher(config["matcher"])
-    
-    # Select filter EKF
+
+    # Initialize the filter
+    filter_obj = None
     if args.filter == "ekf":
         filter_obj = ExtendedKalmanFilter(config.get("filter", {}))
-        
-    initialized = False
+        filter_obj.initialize()
 
-    absscale = AbsoluteScaleComputer()
-
-    # Check if this is a robot dataset from config
+    # Robot and KAIST datasets often have different axis conventions
     is_robot = config["dataset"].get("is_robot", False)
+    is_kaist = config["dataset"].get("is_kaist", False)
+
     traj_plotter = TrajPlotter(is_robot=is_robot)
 
-    # Initialize Wheel Odometry only if the flag is True
+    # Initialize Wheel Odometry
     wo = None
     if args.encoder:
         print("[INFO] Encoder Flag Detected: Initializing Wheel Odometry...")
@@ -269,71 +274,63 @@ def run(args):
     
     vo = VisualOdometry(detector, matcher, loader.cam)
 
-    # INITIALIZE RTSP HANDLER (only if --rtsp flag is set)
+    # Initialize RTSP Handler
     rtsp_handler = None
     if args.rtsp:
         rtsp_handler = RSTPHandler(config)
 
-    # ========================================================
-    # MAIN LOOP
-    # ========================================================
+    # Main loop
     for i, img in enumerate(loader):
-        gt_pose, img_gt = loader.get_cur_pose()
-        t_wo = None  # Default if no wheel odometry
-        yaw_wo = 0.0 # Default fallback
+        gt_pose, _ = loader.get_cur_pose()
         
+        # Correcting the order of gt_pose for robot datasets 
+        if is_robot:
+            gt_pose[0], gt_pose[1] = gt_pose[1], gt_pose[0]
+
         timestamp = loader.times[i]
         timestamp_prev = loader.times[i - 1] if i > 0 else timestamp
 
-        # 2. Wheel Odometry update
+        # Wheel Odometry update
+        # It's interpolated so no need to worry about missing timestamps
         if wo:
             yaw_wo, R_wo, t_wo_raw, w_wo, v_wo = wo.update(
                 prev_timestamp=timestamp_prev, 
                 cur_timestamp=timestamp
             )
-            
+
             # Correction for robot and kaist datasets
-            t_wo = np.zeros((3, 1))
-            if config["dataset"].get("is_kaist", False):
-                t_wo[0, 0] = -t_wo_raw[1]  
-                t_wo[1, 0] = t_wo_raw[0]  
-                t_wo[2, 0] = 0            
-            if config["dataset"].get("is_robot", False):
-                t_wo[0, 0] = t_wo_raw[0] 
-                t_wo[1, 0] = -t_wo_raw[1]            
-                t_wo[2, 0] = t_wo_raw[2]  
-            
-        # Needed to create the current scale
-        wo_pose = np.eye(4)
-        if t_wo is not None:
+            if is_kaist:
+                t_wo[0, 0] = float(-t_wo_raw[1])  
+                t_wo[1, 0] = float(t_wo_raw[0])  
+                t_wo[2, 0] = 0.0
+            elif is_robot:
+                t_wo[0, 0] = float(t_wo_raw[0]) 
+                t_wo[1, 0] = float(-t_wo_raw[1])            
+                t_wo[2, 0] = float(t_wo_raw[2])
+            else:
+                t_wo[0, 0] = 0.0
+                t_wo[1, 0] = 0.0
+                t_wo[2, 0] = 0.0
+
+            # Needed to create the current scale
             wo_pose[:3, :3] = R_wo
             wo_pose[:3, 3] = t_wo.flatten()
 
-        current_scale = absscale.update(wo_pose)
-
-        # 3. Visual Odometry update
-        if is_robot:
-            R_vo, t_vo, rm_vo, rr_vo = vo.update(img, absolute_scale=0.01)
+        if wo:
+            current_scale = absscale.update(wo_pose)
+        # Verifies if it's the kitti dataset
+        if not (is_robot or is_kaist):
+            current_scale = absscale.update(gt_pose)
         else:
-            R_vo, t_vo, rm_vo, rr_vo = vo.update(img, absolute_scale=current_scale)
+            current_scale = 0.01 
 
-        # Correcting the order of gt_pose for robot datasets 
-        if is_robot:
-            gt_pose[0], gt_pose[1] = gt_pose[1], gt_pose[0]
+        # Update Visual Odometry and get the current pose estimation
+        R_vo, t_vo, rm_vo, rr_vo = vo.update(img, absolute_scale=current_scale)
 
-        # 4. Logging (Handling None for t_wo)
+        # Logging (Handling None for t_wo)
         wo_log = t_wo if t_wo is not None else np.zeros((3, 1))
 
-        # initialize filter using first measurement
-        if args.filter is not None and not initialized and t_vo is not None:
-            filter_obj.initialize()
-            initialized = True
-
-        # ========================================================
-        # FILTER EXECUTION (VO for Predict, WO for Update)
-        # ========================================================
-        if args.filter is not None and initialized:
-            
+        if filter_obj:
             # 1. Predict step uses Visual Odometry (VO)
             filter_obj.predict(t_vo)
             
@@ -363,14 +360,14 @@ def run(args):
             file=log_fopen,
         )
 
-        # 5. Visualization
+        # Visualization
         img1 = keypoints_plot(img, vo)
         img2 = traj_plotter.update(t_vo, gt_pose[:, 3], wo_xyz=t_wo, ekf_xyz=t_filtered)
         
         cv2.imshow("keypoints", img1)
         cv2.imshow("trajectory", img2)
 
-        # MATCH AND DISPLAY RTSP IMAGE
+        # RTSP Visualization
         if rtsp_handler is not None and rtsp_handler.has_rtsp_images():
             rtsp_display, diff_ms, closest_ts = rtsp_handler.get_rtsp_image(timestamp)
             
@@ -386,7 +383,7 @@ def run(args):
     log_fopen.close()
     
     # Save errors to CSV
-    dataset_name = config["dataset"].get("name", fname)
+    dataset_name = config["dataset"].get("path", fname)
     traj_plotter.save_errors_to_csv(dataset_name)
 
 
@@ -408,7 +405,7 @@ if __name__ == "__main__":
         type=str,
         choices=["ekf"],
         default=None,
-        help="Filter to use: 'lkf' for Linear Kalman Filter, 'ekf' for Extended Kalman Filter",
+        help="Filter to use: 'ekf' for Extended Kalman Filter",
     )
     parser.add_argument(
         "--rtsp",
