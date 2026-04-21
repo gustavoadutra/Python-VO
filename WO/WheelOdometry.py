@@ -246,7 +246,8 @@ class WheelOdometry(object):
             
             # Sum all complete intermediate readings
             if idx_start < idx_end:
-                for i in range(idx_start, idx_end):
+                # Ensure i + 1 never exceeds valid dataframe indices
+                for i in range(idx_start, min(idx_end, len(self.df) - 1)):
                     d_left += self.df.iloc[i + 1]["left"] - self.df.iloc[i]["left"]
                     d_right += self.df.iloc[i + 1]["right"] - self.df.iloc[i]["right"]
             
