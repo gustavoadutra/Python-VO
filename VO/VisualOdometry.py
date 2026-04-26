@@ -28,7 +28,7 @@ class VisualOdometry(object):
         self.cur_R = np.eye(3)
         self.cur_t = np.zeros((3, 1))
 
-        # Relative motion for EKF/External use
+        # Relative motion for filter use
         self.relative_motion = np.zeros((3, 1))
         self.relative_rotation = np.eye(3)
 

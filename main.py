@@ -144,7 +144,7 @@ def run(args):
 
         # Visualization
         img1 = keypoints_plot(img, vo)
-        img2 = traj_plotter.update(t_vo, gt_pose[:, 3], wo_xyz=t_wo, ekf_xyz=t_filtered)
+        img2 = traj_plotter.update(t_vo, gt_pose[:, 3], wo_xyz=t_wo, filter_xyz=t_filtered)
         
         cv2.imshow("keypoints", img1)
         cv2.imshow("trajectory", img2)

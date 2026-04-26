@@ -19,25 +19,25 @@ class TrajPlotter(object):
         self.errors = []
         self.vo_errors = []
         self.wo_errors = []
-        self.ekf_errors = []
+        self.filter_errors = []
         self.vo_positions = []
         self.wo_positions = []
-        self.ekf_positions = []
+        self.filter_positions = []
         self.gt_positions = []
         self.is_robot = is_robot
         self.w, self.h = width, height
         self.offset_x = self.w // 2
         self.offset_y = self.h // 2
         self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
-        self.scale = 0.1 if not is_robot else 200  # Adjust scale for robot datasets
+        self.scale = 0.5 if not is_robot else 200  # Adjust scale for robot datasets
         
-    def update(self, est_xyz, gt_xyz, wo_xyz=None, ekf_xyz=None):
+    def update(self, est_xyz, gt_xyz, wo_xyz=None, filter_xyz=None):
         """
         Updates the trajectory plot.
         :param est_xyz: Visual Odometry position
         :param gt_xyz: Ground Truth position
         :param wo_xyz: Wheel Odometry position (Optional)
-        :param ekf_xyz: EKF position (Optional)
+        :param filter_xyz: Filter position (Optional)
         """
         x, z = est_xyz[0], est_xyz[2]
         gt_x, gt_z = gt_xyz[0], gt_xyz[2]
@@ -66,14 +66,14 @@ class TrajPlotter(object):
             self.wo_positions.append([float(np.asarray(wo_xyz[0]).flat[0]), float(np.asarray(wo_xyz[1]).flat[0])])
             avg_wo_error = np.mean(np.array(self.wo_errors))
 
-        # Calculate EKF error if available
-        avg_ekf_error = None
-        if ekf_xyz is not None:
-            ekf_est = np.array([ekf_xyz[0], ekf_xyz[2]]).reshape(2)
-            ekf_error = np.linalg.norm(ekf_est - gt)
-            self.ekf_errors.append(ekf_error)
-            self.ekf_positions.append([float(np.asarray(ekf_xyz[0]).flat[0]), float(np.asarray(ekf_xyz[2]).flat[0])])
-            avg_ekf_error = np.mean(np.array(self.ekf_errors))
+        # Calculate Filter error if available
+        avg_filter_error = None
+        if filter_xyz is not None:
+            filter_est = np.array([filter_xyz[0], filter_xyz[2]]).reshape(2)
+            filter_error = np.linalg.norm(filter_est - gt)
+            self.filter_errors.append(filter_error)
+            self.filter_positions.append([float(np.asarray(filter_xyz[0]).flat[0]), float(np.asarray(filter_xyz[2]).flat[0])])
+            avg_filter_error = np.mean(np.array(self.filter_errors))
 
         draw_x = int((x * self.scale).item()) + self.offset_x
         draw_y = int((z * self.scale).item()) + self.offset_y
@@ -95,12 +95,12 @@ class TrajPlotter(object):
             )
             cv2.circle(self.traj, (wo_x, wo_z), 1, (255, 0, 0), 1)
 
-        if ekf_xyz is not None:
-            ekf_x, ekf_z = (
-                int(ekf_xyz[0].item() * self.scale) + self.offset_x,
-                int(ekf_xyz[2].item() * self.scale) + self.offset_y,
+        if filter_xyz is not None:
+            filter_x, filter_z = (
+                int(filter_xyz[0].item() * self.scale) + self.offset_x,
+                int(filter_xyz[2].item() * self.scale) + self.offset_y,
             )
-            cv2.circle(self.traj, (ekf_x, ekf_z), 1, (255, 255, 0), 1)
+            cv2.circle(self.traj, (filter_x, filter_z), 1, (255, 255, 0), 1)
 
         # Draw error trajectories as lines connecting consecutive error positions
         # VO Error trajectory (Green dotted)
@@ -127,15 +127,15 @@ class TrajPlotter(object):
                      int(curr_wo[1] * self.scale) + self.offset_y),
                     (150, 100, 50), 1)  # Darker blue for error trajectory
 
-        # EKF Error trajectory (Yellow dotted)
-        if len(self.ekf_errors) > 1 and ekf_xyz is not None:
-            prev_ekf = self.ekf_positions[-2]
-            curr_ekf = self.ekf_positions[-1]
+        # Filter Error trajectory (Yellow dotted)
+        if len(self.filter_errors) > 1 and filter_xyz is not None:
+            prev_filter = self.filter_positions[-2]
+            curr_filter = self.filter_positions[-1]
             cv2.line(self.traj,
-                    (int(prev_ekf[0] * self.scale) + self.offset_x,
-                     int(prev_ekf[1] * self.scale) + self.offset_y),
-                    (int(curr_ekf[0] * self.scale) + self.offset_x,
-                     int(curr_ekf[1] * self.scale) + self.offset_y),
+                    (int(prev_filter[0] * self.scale) + self.offset_x,
+                     int(prev_filter[1] * self.scale) + self.offset_y),
+                    (int(curr_filter[0] * self.scale) + self.offset_x,
+                     int(curr_filter[1] * self.scale) + self.offset_y),
                     (150, 150, 100), 1)  # Darker cyan for error trajectory
 
         # Legend and Text
@@ -154,11 +154,11 @@ class TrajPlotter(object):
             )
             y_offset += 15
         
-        # Display EKF error if available
-        if avg_ekf_error is not None:
-            text_ekf = "EKF Error: %2.4fm" % (avg_ekf_error)
+        # Display Filter error if available
+        if avg_filter_error is not None:
+            text_filter = "Filter Error: %2.4fm" % (avg_filter_error)
             cv2.putText(
-                self.traj, text_ekf, (20, y_offset), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 0), 1, 8
+                self.traj, text_filter, (20, y_offset), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 0), 1, 8
             )
 
         # Legend Colors
@@ -178,10 +178,10 @@ class TrajPlotter(object):
                 (255, 0, 0),
                 1,
             )
-        if ekf_xyz is not None:
+        if filter_xyz is not None:
             cv2.putText(
                 self.traj,
-                "EKF (Cyan)",
+                "Filter (Cyan)",
                 (400, 80),
                 cv2.FONT_HERSHEY_PLAIN,
                 1,
@@ -202,7 +202,7 @@ class TrajPlotter(object):
         base_name = f"{suffix}_errors.csv" if suffix else "errors.csv"
         csv_filename = os.path.join(seq_folder, base_name)
         
-        max_len = max(len(self.vo_errors), len(self.wo_errors), len(self.ekf_errors))
+        max_len = max(len(self.vo_errors), len(self.wo_errors), len(self.filter_errors))
         
         with open(csv_filename, mode='w', newline='') as csv_file:
             if detector_name or matcher_name:
@@ -218,7 +218,7 @@ class TrajPlotter(object):
                     'Frame': i,
                     'VO_Error': self.vo_errors[i] if i < len(self.vo_errors) else '',
                     'WO_Error': self.wo_errors[i] if i < len(self.wo_errors) else '',
-                    'FILTER_Error': self.ekf_errors[i] if i < len(self.ekf_errors) else '',
+                    'FILTER_Error': self.filter_errors[i] if i < len(self.filter_errors) else '',
                 })
         
         print(f"[INFO] Errors saved to {csv_filename}")
