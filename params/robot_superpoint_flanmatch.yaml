@@ -22,7 +22,4 @@ matcher:
     kdTrees: 5
     searchChecks: 50
   distance_ratio: 0.75
-
-ekf:
-  measurement_noise_vo: 0.05
-  measurement_noise_wo: 0.1
+  

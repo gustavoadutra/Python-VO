@@ -111,30 +111,3 @@ class FrameByFrameMatcher(object):
 
     def draw_matched(self, img0, img1):
         pass
-
-
-if __name__ == "__main__":
-    from DataLoader.KITTILoader import KITTILoader
-    from DataLoader.SequenceImageLoader import SequenceImageLoader
-    from Detectors.HandcraftDetector import HandcraftDetector
-
-    # loader = KITTILoader()
-    loader = SequenceImageLoader()
-    detector = HandcraftDetector({"type": "SIFT"})
-    matcher = FrameByFrameMatcher({"type": "FLANN"})
-
-    kptdescs = {}
-    imgs = {}
-    for i, img in enumerate(loader):
-        imgs["cur"] = img
-        kptdescs["cur"] = detector(img)
-        if i >= 1:
-            matches = matcher(kptdescs)
-            img = plot_matches(imgs['ref'], imgs['cur'],
-                               matches['ref_keypoints'][0:200], matches['cur_keypoints'][0:200],
-                               matches['match_score'][0:200], layout='lr')
-            cv2.imshow("track", img)
-            if cv2.waitKey() == 27:
-                break
-
-        kptdescs["ref"], imgs["ref"] = kptdescs["cur"], imgs["cur"]

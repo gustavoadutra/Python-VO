@@ -15,7 +15,3 @@ matcher:
   weights: /home/aki/Desktop/Python-VO/Detectors/accelerated_features/weights/xfeat-lighterglue.pt
   min_conf: 0.0
   cuda: 1
-
-ekf:
-  measurement_noise_vo: 0.05
-  measurement_noise_wo: 0.1

@@ -6,38 +6,17 @@ import pandas as pd
 
 
 class WheelOdometry(object):
-    """
-    Wheel Odometry with KAIST CSV support and Asymmetric Wheel Calibration.
-    
-    Implements differential drive kinematics with support for:
-    - Asymmetric left/right wheel radius calibration
-    - KAIST encoder CSV loading and timestamp interpolation
-    - Pose tracking with rotation matrices and translation vectors
-    - Linear and angular velocity estimation
-    """
+    """Wheel Odometry with differential drive kinematics and encoder calibration."""
 
     def __init__(self, config: Dict = {}):
-        """
-        Initialize Wheel Odometry system.
-        
-        Loads calibration parameters from EncoderParameter.txt and encoder data from encoder.csv.
-        Falls back to default Prius approximation parameters if files are not found.
-        
-        Args:
-            config (Dict): Configuration dictionary with keys:
-                - 'root_path': Root directory of dataset
-                - 'sequence': Sequence identifier (e.g., 'dataset_20260126_084725')
-        """
-        """
+        """Initialize with config dict containing 'root_path' and 'sequence' keys."""
+
         encoder_param_path = (
             Path(config["root_path"])
             / config["sequence"]
             / "calibration"
             / "EncoderParameter.txt"
         )
-        """
-        encoder_param_path = None  # Set to None to skip loading calibration file (use defaults)
-
 
         csv_path = (
             Path(config["root_path"])
@@ -71,19 +50,7 @@ class WheelOdometry(object):
             self.load_kaist_csv(csv_path)
 
     def load_calibration(self, param_file):
-        """
-        Parses EncoderParameter.txt to set precise calibration values.
-        
-        Reads encoder resolution, left/right wheel diameters, and wheel base from the 
-        calibration file. Automatically converts diameters to radii. Updates conversion 
-        factors after loading.
-        
-        Args:
-            param_file (str or Path): Path to EncoderParameter.txt calibration file
-            
-        Raises:
-            Exception: If file cannot be opened or parsed; falls back to default parameters
-        """
+        """Load calibration parameters from EncoderParameter.txt."""
         print(f"[INFO] Loading calibration from {param_file}...")
         try:
             with open(param_file, "r") as f:
@@ -108,15 +75,7 @@ class WheelOdometry(object):
             print("[WARN] Using default parameters.")
 
     def _update_conversion_factors(self):
-        """
-        Calculates tick-to-meter conversion factors for each wheel.
-        
-        Computes the distance traveled per encoder tick for left and right wheels
-        using: conversion_factor = (2 * pi * radius) / ticks_per_revolution
-        
-        Allows asymmetric wheel calibration for left and right wheels.
-        Prints calibration parameters to console for verification.
-        """
+        """Calculate tick-to-meter conversion factors for asymmetric wheels."""
         self.tick_to_meter_left = (2 * np.pi * self.radius_left) / self.ticks_per_rev
         self.tick_to_meter_right = (2 * np.pi * self.radius_right) / self.ticks_per_rev
 
@@ -127,18 +86,7 @@ class WheelOdometry(object):
         print(f"  - Resolution: {self.ticks_per_rev}")
 
     def load_kaist_csv(self, csv_path):
-        """
-        Loads the encoder data CSV in KAIST format.
-        
-        Reads a CSV file with columns: timestamp (nanoseconds), left ticks, right ticks.
-        Converts timestamps from nanoseconds to seconds for internal use.
-        
-        Args:
-            csv_path (str or Path): Path to encoder.csv file with columns [timestamp, left, right]
-            
-        Raises:
-            FileNotFoundError: If CSV file does not exist at the specified path
-        """
+        """Load encoder CSV with [timestamp, left, right] columns."""
         print(f"[INFO] Loading encoder data from: {csv_path}")
         try:
             self.df = pd.read_csv(
@@ -150,18 +98,7 @@ class WheelOdometry(object):
             raise FileNotFoundError(f"Could not find encoder file at: {csv_path}")
 
     def get_interpolated_ticks(self, target_time):
-        """
-        Synchronizes encoder ticks to a specific image timestamp via linear interpolation.
-        
-        Uses binary search to find the encoder readings closest to the target timestamp,
-        then linearly interpolates between them to get ticks at the exact target time.
-        
-        Args:
-            target_time (float): Target timestamp in seconds
-            
-        Returns:
-            tuple: (left_ticks, right_ticks) interpolated at target_time
-        """
+        """Linearly interpolate ticks at target_time."""
         if self.df is None:
             return 0, 0
 
@@ -186,25 +123,7 @@ class WheelOdometry(object):
         return interp_left, interp_right
 
     def get_tick_deltas(self, t1, t2):
-        """
-        Calculates proper tick differences between two timestamps using raw sensor data.
-        
-        This method solves the interpolation-error problem by:
-        1. Finding all raw encoder readings strictly between t1 and t2
-        2. Summing their actual tick differences (preserves true increments)
-        3. Interpolating only the fractional parts at the boundaries
-        
-        This is more accurate than interpolating absolute values independently
-        and then differencing them, which causes errors to compound (especially
-        problematic for turning angle calculations).
-        
-        Args:
-            t1 (float): Start timestamp in seconds
-            t2 (float): End timestamp in seconds
-            
-        Returns:
-            tuple: (delta_left_ticks, delta_right_ticks) between t1 and t2
-        """
+        """Get proper tick differences between two timestamps via interpolation."""
         if self.df is None:
             return 0, 0
         
@@ -273,34 +192,7 @@ class WheelOdometry(object):
         return d_left, d_right
 
     def update(self, left_tick=None, right_tick=None, dt=None, prev_timestamp=None, cur_timestamp=None):
-        """
-        Calculates pose update using Differential Drive Kinematics.
-        
-        Supports two input modes:
-        
-        Mode 1 (Legacy): Absolute tick counts
-            update(left_tick=100, right_tick=105, dt=0.05)
-            
-        Mode 2 (NEW - Recommended): Timestamps with proper interpolation
-            update(prev_timestamp=10.5, cur_timestamp=10.6)
-            Automatically calculates proper tick deltas from raw encoder data,
-            avoiding interpolation errors in turning calculations.
-        
-        Args:
-            left_tick (float, optional): Left wheel encoder ticks (Mode 1)
-            right_tick (float, optional): Right wheel encoder ticks (Mode 1)
-            dt (float, optional): Time delta since last update in seconds (Mode 1)
-            prev_timestamp (float, optional): Previous frame timestamp in seconds (Mode 2)
-            cur_timestamp (float, optional): Current frame timestamp in seconds (Mode 2)
-            
-        Returns:
-            tuple: (cur_theta, cur_R, cur_t, w, v) where:
-                - cur_theta: Current heading angle in radians
-                - cur_R: 3x3 rotation matrix (current orientation)
-                - cur_t: 3x1 translation vector (current position)
-                - w: Angular velocity (yaw rate) in rad/s
-                - v: Linear velocity in m/s
-        """
+        """Update pose using differential drive kinematics. Return (theta, R, t, w, v)."""
         # Mode 2: Timestamp-based (new, recommended)
         if prev_timestamp is not None and cur_timestamp is not None:
             dt = cur_timestamp - prev_timestamp

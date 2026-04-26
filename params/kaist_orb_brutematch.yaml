@@ -28,6 +28,3 @@ matcher:
     first_N: 300 # For hamming matching, use first N min matches
   distance_ratio: 0.75
 
-ekf:
-  measurement_noise_vo: 0.05
-  measurement_noise_wo: 0.1

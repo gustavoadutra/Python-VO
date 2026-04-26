@@ -191,35 +191,34 @@ class TrajPlotter(object):
 
         return self.traj
 
-    def save_errors_to_csv(self, dataset_name, output_folder="data"):
-        """
-        Save individual errors to a CSV file.
-        :param dataset_name: Name of the dataset
-        :param output_folder: Folder to save the CSV (relative to Python-VO directory)
-        """
-        # Create data folder if it doesn't exist
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
+    def save_errors_to_csv(self, config, detector_name="", matcher_name="", output_folder="data"):
+        # Create full path including sequence subdirectory
+        sequence = config['dataset'].get('sequence', 'unknown')
+        seq_folder = os.path.join(output_folder, sequence)
+        os.makedirs(seq_folder, exist_ok=True)
         
-        # Create CSV filename
-        csv_filename = os.path.join(output_folder, f"{dataset_name}_errors.csv")
+        # Create filename with detector and matcher names (sequence already in path)
+        suffix = f"{detector_name}_{matcher_name}" if detector_name and matcher_name else ""
+        base_name = f"{suffix}_errors.csv" if suffix else "errors.csv"
+        csv_filename = os.path.join(seq_folder, base_name)
         
-        # Determine the maximum number of error records
         max_len = max(len(self.vo_errors), len(self.wo_errors), len(self.ekf_errors))
         
-        # Write to CSV
         with open(csv_filename, mode='w', newline='') as csv_file:
-            fieldnames = ['Frame', 'VO_Error', 'WO_Error', 'EKF_Error']
-            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+            if detector_name or matcher_name:
+                csv_file.write(f"# Detector: {detector_name}\n")
+                csv_file.write(f"# Matcher: {matcher_name}\n")
             
+            fieldnames = ['Frame', 'VO_Error', 'WO_Error', 'FILTER_Error']
+            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
             writer.writeheader()
+            
             for i in range(max_len):
-                row = {
+                writer.writerow({
                     'Frame': i,
                     'VO_Error': self.vo_errors[i] if i < len(self.vo_errors) else '',
                     'WO_Error': self.wo_errors[i] if i < len(self.wo_errors) else '',
-                    'EKF_Error': self.ekf_errors[i] if i < len(self.ekf_errors) else '',
-                }
-                writer.writerow(row)
+                    'FILTER_Error': self.ekf_errors[i] if i < len(self.ekf_errors) else '',
+                })
         
         print(f"[INFO] Errors saved to {csv_filename}")

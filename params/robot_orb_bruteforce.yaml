@@ -26,7 +26,3 @@ matcher:
     HAMMING: True  # For ORB Binary descriptor, only can use hamming matching
     first_N: 300 # For hamming matching, use first N min matches
   distance_ratio: 0.75
-
-ekf:
-  measurement_noise_vo: 0.05   # Lower = trust VO more
-  measurement_noise_wo: 0.1    # Higher = trust WO more

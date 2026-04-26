@@ -50,6 +50,7 @@ def run(args):
     if args.encoder:
         print("[INFO] Encoder Flag Detected: Initializing Wheel Odometry...")
         wo = WheelOdometry(config["dataset"])
+        print(f"[DEBUG] WO initialized. CSV loaded: {wo.df is not None}")
 
     fname = args.config.split("/")[-1].split(".")[0]
     log_fopen = open("results/" + fname + ".txt", mode="a")
@@ -63,23 +64,24 @@ def run(args):
 
     # Main loop
     for i, img in enumerate(loader):
-        gt_pose, _ = loader.get_cur_pose()
+        gt_pose = loader.get_cur_pose()
         
         # Correcting the order of gt_pose for robot datasets 
         if is_robot:
             gt_pose[0], gt_pose[1] = gt_pose[1], gt_pose[0]
 
-        timestamp = loader.times[i]
-        timestamp_prev = loader.times[i - 1] if i > 0 else timestamp
-
         # Wheel Odometry update
         # It's interpolated so no need to worry about missing timestamps
         if wo:
+            # Used to synchronize with RTSP frames and velocity from WO
+            timestamp = loader.times[i]
+            timestamp_prev = loader.times[i - 1] if i > 0 else timestamp
+            
             yaw_wo, R_wo, t_wo_raw, w_wo, v_wo = wo.update(
                 prev_timestamp=timestamp_prev, 
                 cur_timestamp=timestamp
             )
-
+            
             # Correction for robot and kaist datasets
             if is_kaist:
                 t_wo[0, 0] = (-t_wo_raw[1]).item()  
@@ -98,13 +100,11 @@ def run(args):
             wo_pose[:3, :3] = R_wo
             wo_pose[:3, 3] = t_wo.flatten()
 
-        if wo:
-            current_scale = absscale.update(wo_pose)
         # Verifies if it's the kitti dataset
-        if not (is_robot or is_kaist):
-            current_scale = absscale.update(gt_pose)
-        else:
-            current_scale = 0.01 
+        #if is_robot or is_kaist:
+        #    current_scale = absscale.update(wo_pose)
+        #else:
+        current_scale = absscale.update(gt_pose)
 
         # Update Visual Odometry and get the current pose estimation
         R_vo, t_vo, rm_vo, rr_vo = vo.update(img, absolute_scale=current_scale)
@@ -164,9 +164,10 @@ def run(args):
     cv2.imwrite("results/" + fname + ".png", img2)
     log_fopen.close()
     
-    # Save errors to CSV
-    dataset_name = config["dataset"].get("root_path", fname)
-    traj_plotter.save_errors_to_csv(dataset_name)
+    # Save errors to CSV with detector and matcher names
+    detector_name = config["detector"].get("type", config["detector"].get("name", "unknown"))
+    matcher_name = config["matcher"].get("type", config["matcher"].get("name", "unknown"))
+    traj_plotter.save_errors_to_csv(config, detector_name=detector_name, matcher_name=matcher_name)
 
 
 if __name__ == "__main__":
