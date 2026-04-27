@@ -84,12 +84,12 @@ def run(args):
             
             # Correction for robot and kaist datasets
             if is_kaist:
-                t_wo[0, 0] = (-t_wo_raw[1]).item()  
-                t_wo[1, 0] = (t_wo_raw[0]).item()  
+                t_wo[0, 0] = (-t_wo_raw[1]).item()
+                t_wo[1, 0] = (t_wo_raw[0]).item()
                 t_wo[2, 0] = 0.0
             elif is_robot:
-                t_wo[0, 0] = (t_wo_raw[0]).item() 
-                t_wo[1, 0] = (-t_wo_raw[1]).item()            
+                t_wo[0, 0] = (t_wo_raw[0]).item()
+                t_wo[1, 0] = (-t_wo_raw[1]).item()
                 t_wo[2, 0] = (t_wo_raw[2]).item()
             else:
                 t_wo[0, 0] = 0.0

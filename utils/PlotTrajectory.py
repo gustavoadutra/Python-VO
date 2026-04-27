@@ -29,7 +29,7 @@ class TrajPlotter(object):
         self.offset_x = self.w // 2
         self.offset_y = self.h // 2
         self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
-        self.scale = 0.5 if not is_robot else 200  # Adjust scale for robot datasets
+        self.scale = 0.25 if not is_robot else 200  # Adjust scale for robot datasets
         
     def update(self, est_xyz, gt_xyz, wo_xyz=None, filter_xyz=None):
         """

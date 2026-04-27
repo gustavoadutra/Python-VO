@@ -126,9 +126,12 @@ class AbsoluteScaleComputer(object):
             
             # Distance formula between previous and current GT position
             scale = np.sqrt(
-                (self.cur_pose[0, 3] - self.prev_pose[0, 3])**2 +
-                (self.cur_pose[1, 3] - self.prev_pose[1, 3])**2 +
-                (self.cur_pose[2, 3] - self.prev_pose[2, 3])**2
+                (self.cur_pose[0, 3] - self.prev_pose[0, 3])
+                * (self.cur_pose[0, 3] - self.prev_pose[0, 3])
+                + (self.cur_pose[1, 3] - self.prev_pose[1, 3])
+                * (self.cur_pose[1, 3] - self.prev_pose[1, 3])
+                + (self.cur_pose[2, 3] - self.prev_pose[2, 3])
+                * (self.cur_pose[2, 3] - self.prev_pose[2, 3])
             )
             
         self.count += 1
