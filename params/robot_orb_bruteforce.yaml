@@ -2,7 +2,7 @@ dataset:
   name: ComplexUrbanDatasetLoader
   root_path: /home/aki/Desktop/old_cuscobot/
   #root_path: test_imgs
-  sequence: dataset_20260126_105418/
+  sequence: dataset_20260321_115430/
   start: 0
   is_robot: True
 

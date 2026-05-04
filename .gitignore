@@ -2,3 +2,6 @@ __pycache__
 *.pyc
 temp
 results
+
+.vscode
+data

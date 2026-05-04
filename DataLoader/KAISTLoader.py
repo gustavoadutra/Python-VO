@@ -4,14 +4,13 @@ import logging
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Iterator
+import matplotlib.pyplot as plt
 
 from utils.PinholeCamera import PinholeCamera
 
 
 class ComplexUrbanDatasetLoader:
-    """
-    DataLoader for the Complex Urban Dataset.
-    """
+    # DataLoader for Complex Urban Dataset
 
     default_config = {
         "root_path": "/run/media/aki/OhShit/dataset_hdd/urban27",
@@ -84,60 +83,38 @@ class ComplexUrbanDatasetLoader:
             )
 
     def _load_data(self):
-        """
-        Loads the image list and creates 'self.times' for synchronization.
-        """
-        # Load Image Timestamps from CSV
+        # Load timestamps from CSV or fallback to image folder
         stamp_file_path = self.sequence_path / "sensor_data/stereo_stamp.csv"
-        print(stamp_file_path.exists())
-        # Lógica de Fallback
         if stamp_file_path.exists():
-            # Caso 1: Arquivo CSV existe - carrega normalmente
             df_stamps = pd.read_csv(stamp_file_path, header=None)
-            self.timestamps = pd.to_numeric(df_stamps.iloc[:, 0]).values.astype(
+            self.timestamps_vo = pd.to_numeric(df_stamps.iloc[:, 0]).values.astype(
                 np.int64
             )
         else:
-            # Caso 2: Arquivo não existe - carrega da pasta de imagens
-            print(
-                f"Aviso: {stamp_file_path} não encontrado. Criando timestamps a partir da pasta de imagens."
-            )
-
-            # Busca todos os arquivos .png na pasta
+            print(f"Warning: {stamp_file_path} not found. Loading timestamps from images.")
             image_paths = list(self.img_folder.glob("*.png"))
-
             if not image_paths:
-                raise FileNotFoundError(
-                    f"Nenhuma imagem encontrada em: {self.img_folder} para gerar timestamps."
-                )
-
-            # Extrai o nome do arquivo (sem extensão) e converte para int
-            # Exemplo: path/to/1600000.png -> 1600000
+                raise FileNotFoundError(f"No images in: {self.img_folder}")
             try:
                 ts_list = [int(p.stem) for p in image_paths]
             except ValueError:
-                raise ValueError(
-                    "Os nomes das imagens não são numéricos, impossível gerar timestamps automaticamente."
-                )
+                raise ValueError("Image filenames must be numeric.")
+            self.timestamps_vo = np.array(sorted(ts_list), dtype=np.int64)
 
-            # É crucial ordenar os timestamps, pois o sistema de arquivos não garante ordem
-            self.timestamps = np.array(sorted(ts_list), dtype=np.int64)
+        # Convert nanoseconds to seconds for encoder sync
+        self.times = self.timestamps_vo / 1e9
 
-        # === CRITICAL ADDITION FOR WHEEL ODOMETRY SYNC ===
-        # Convert nanoseconds to seconds so main.py can sync with encoder.csv
-        self.times = self.timestamps / 1e9
-        # =================================================
         self.img_files = []
-        for ts in self.timestamps:
+        for ts in self.timestamps_vo:
             img_p = self.img_folder / f"{ts}.png"
             self.img_files.append(str(img_p))
 
         logging.info(f"Loaded {len(self.img_files)} image entries.")
 
-        # Load GPS Data for Ground Truth (Optional validation)
+        # Load GPS for ground truth poses
         vrs_gps_path = self.sequence_path / "sensor_data/vrs_gps.csv"
         if not vrs_gps_path.exists():
-            logging.error("GPS file not found. GT poses will be empty.")
+            logging.error("GPS file not found.")
             self.gt_poses = []
             return
 
@@ -147,47 +124,43 @@ class ComplexUrbanDatasetLoader:
             gps_df[col] = pd.to_numeric(gps_df[col])
 
         gps_data = gps_df.values
-        gps_ts_raw = gps_data[:, 0].astype(np.float64)
+        self.gps_ts_raw = gps_data[:, 0].astype(np.float64)
         gps_x_raw = gps_data[:, 3].astype(np.float64)
         gps_y_raw = gps_data[:, 4].astype(np.float64)
         gps_z_raw = gps_data[:, 5].astype(np.float64)
 
-        if len(gps_ts_raw) == 0:
+        if len(self.gps_ts_raw) == 0:
             self.gt_poses = []
             return
-
-        target_ts = self.timestamps.astype(np.float64)
-
-        interp_x = np.interp(target_ts, gps_ts_raw, gps_x_raw)
-        interp_y = np.interp(target_ts, gps_ts_raw, gps_y_raw)
-        interp_z = np.interp(target_ts, gps_ts_raw, gps_z_raw)
+        
+        target_ts = self.timestamps_vo.astype(np.float64)
+        interp_x = np.interp(target_ts, self.gps_ts_raw, gps_x_raw)
+        interp_y = np.interp(target_ts, self.gps_ts_raw, gps_y_raw)
+        interp_z = np.interp(target_ts, self.gps_ts_raw, gps_z_raw)
 
         raw_poses = []
-        for i in range(len(self.timestamps)):
+        for i in range(len(self.timestamps_vo)):
             pose = np.eye(4)
             pose[0, 3] = interp_x[i]
             pose[1, 3] = interp_z[i]
             pose[2, 3] = interp_y[i]
 
-            idx_nearest = np.argmin(np.abs(gps_ts_raw - target_ts[i]))
+            idx_nearest = np.argmin(np.abs(self.gps_ts_raw - target_ts[i]))
             row_raw = gps_data[idx_nearest]
-
-            if row_raw[12] == 1:
+            if row_raw[12] == 1:  # Valid heading
                 heading = np.radians(row_raw[13])
-                cos_h = np.cos(heading)
-                sin_h = np.sin(heading)
+                cos_h, sin_h = np.cos(heading), np.sin(heading)
                 pose[:3, :3] = np.array(
                     [[cos_h, -sin_h, 0], [sin_h, cos_h, 0], [0, 0, 1]]
                 )
             raw_poses.append(pose)
 
+        # Convert to relative poses from first frame
         self.gt_poses = []
         if len(raw_poses) > 0:
-            first_pose = raw_poses[0]
-            first_pose_inv = np.linalg.inv(first_pose)
+            first_pose_inv = np.linalg.inv(raw_poses[0])
             for p in raw_poses:
-                rel_pose = first_pose_inv @ p
-                self.gt_poses.append(rel_pose[:3, :4])
+                self.gt_poses.append((first_pose_inv @ p)[:3, :4])
 
     def get_cur_pose(self) -> np.ndarray:
         idx = self.img_id - 1

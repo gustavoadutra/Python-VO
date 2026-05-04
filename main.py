@@ -3,144 +3,130 @@ import cv2
 import argparse
 import yaml
 import logging
+import os
+import csv
 
 from utils.tools import plot_keypoints
+from utils.RSTPHandler import RSTPHandler
 
 from DataLoader import create_dataloader
 from Detectors import create_detector
 from Matchers import create_matcher
-from VO.VisualOdometry import VisualOdometry, AbosluteScaleComputer
+from VO.VisualOdometry import VisualOdometry, AbsoluteScaleComputer
 from WO.WheelOdometry import WheelOdometry
-
-
-def keypoints_plot(img, vo):
-    if img.shape[2] == 1:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-    return plot_keypoints(
-        img, vo.kptdescs["cur"]["keypoints"], vo.kptdescs["cur"]["scores"]
-    )
-
-
-class TrajPlotter(object):
-    def __init__(self, is_robot=False):
-        self.errors = []
-        self.w, self.h = 800, 800
-        self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
-        self.scale = 0.5 if not is_robot else 500  # Adjust scale for robot datasets
-        
-
-    def update(self, est_xyz, gt_xyz, wo_xyz=None, is_robot=False):
-        """
-        Updates the trajectory plot.
-        :param est_xyz: Visual Odometry position
-        :param gt_xyz: Ground Truth position
-        :param wo_xyz: Wheel Odometry position (Optional)
-        """
-        x, z = est_xyz[0], est_xyz[2]
-        gt_x, gt_z = gt_xyz[0], gt_xyz[2]
-
-        est = np.array([x, z]).reshape(2)
-        gt = np.array([gt_x, gt_z]).reshape(2)
-
-        error = np.linalg.norm(est - gt)
-        self.errors.append(error)
-        avg_error = np.mean(np.array(self.errors))
-
-        # Offset: Centers the start point.
-        offset_x = self.w // 2
-        offset_y = self.h // 2
-
-        draw_x, draw_y = int(x * self.scale) + offset_x, int(z * self.scale) + offset_y
-        true_x, true_y = int(gt_x * self.scale) + offset_x, int(gt_z * self.scale) + offset_y
-
-        # Draw Visual Odometry (Green)
-        cv2.circle(self.traj, (draw_x, draw_y), 1, (0, 255, 0), 1)
-
-        # Draw Ground Truth (Red)
-        cv2.circle(self.traj, (true_x, true_y), 1, (0, 0, 255), 1)
-
-        # Draw Wheel Odometry (Blue) - if available
-        if wo_xyz is not None:
-            wo_x, wo_z = (
-                int(wo_xyz[0] * self.scale) + offset_x,
-                int(wo_xyz[1] * self.scale) + offset_y,
-            )
-            cv2.circle(self.traj, (wo_x, wo_z), 1, (255, 0, 0), 1)
-
-        # Legend and Text
-        cv2.rectangle(self.traj, (10, 20), (600, 80), (0, 0, 0), -1)
-        text = "AvgError: %2.4fm" % (avg_error)
-        cv2.putText(
-            self.traj, text, (20, 40), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1, 8
-        )
-
-        # Legend Colors
-        cv2.putText(
-            self.traj, "VO (Green)", (20, 60), cv2.FONT_HERSHEY_PLAIN, 1, (0, 255, 0), 1
-        )
-        cv2.putText(
-            self.traj, "GT (Red)", (150, 60), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 255), 1
-        )
-        if wo_xyz is not None:
-            cv2.putText(
-                self.traj,
-                "Wheel (Blue)",
-                (250, 60),
-                cv2.FONT_HERSHEY_PLAIN,
-                1,
-                (255, 0, 0),
-                1,
-            )
-
-        return self.traj
+from filters.LFK_PW_UV import KalmanFilter
+from utils.PlotTrajectory import TrajPlotter, keypoints_plot
 
 
 def run(args):
+    # Initialize variables for Wheel Odometry
+    yaw_wo = 0.0
+    t_wo = np.zeros((3, 1))
+    wo_pose = np.eye(4)
+
     with open(args.config, "r") as f:
         config = yaml.load(f, yaml.Loader)
+
+    absscale = AbsoluteScaleComputer()
 
     loader = create_dataloader(config["dataset"])
     detector = create_detector(config["detector"])
     matcher = create_matcher(config["matcher"])
-    absscale = AbosluteScaleComputer()
 
-    # Check if this is a robot dataset from config
+    # Initialize the filter
+    filter_obj = None
+    if args.filter == "lkf":
+        filter_obj = KalmanFilter(config.get("filter", {}))
+        filter_obj.initialize()
+
+    # Robot and KAIST datasets often have different axis conventions
     is_robot = config["dataset"].get("is_robot", False)
+    is_kaist = config["dataset"].get("is_kaist", False)
+
     traj_plotter = TrajPlotter(is_robot=is_robot)
 
-    # Initialize Wheel Odometry only if the flag is True
+    # Initialize Wheel Odometry
     wo = None
     if args.encoder:
         print("[INFO] Encoder Flag Detected: Initializing Wheel Odometry...")
         wo = WheelOdometry(config["dataset"])
+        print(f"[DEBUG] WO initialized. CSV loaded: {wo.df is not None}")
 
     fname = args.config.split("/")[-1].split(".")[0]
     log_fopen = open("results/" + fname + ".txt", mode="a")
+    
     vo = VisualOdometry(detector, matcher, loader.cam)
 
+    # Initialize RTSP Handler
+    rtsp_handler = None
+    if args.rtsp:
+        rtsp_handler = RSTPHandler(config)
+
+    # Main loop
     for i, img in enumerate(loader):
         gt_pose = loader.get_cur_pose()
-        t_wo = None  # Default if no wheel odometry
-
-        current_scale = absscale.update(gt_pose)
-
-        # 2. Wheel Odometry update
-        if wo:
-            timestamp = loader.times[i]
-            l_tick, r_tick = wo.get_interpolated_ticks(timestamp)
-            R_wo, t_wo = wo.update(l_tick, r_tick)
-
-
-        # 3. Visual Odometry update
-        R_vo, t_vo = vo.update(img, absolute_scale=current_scale)
-
+        
+        # Correcting the order of gt_pose for robot datasets 
         if is_robot:
             gt_pose[0], gt_pose[1] = gt_pose[1], gt_pose[0]
 
+        # Wheel Odometry update
+        # It's interpolated so no need to worry about missing timestamps
+        if wo:
+            # Used to synchronize with RTSP frames and velocity from WO
+            timestamp = loader.times[i]
+            timestamp_prev = loader.times[i - 1] if i > 0 else timestamp
+            
+            yaw_wo, R_wo, t_wo_raw, w_wo, v_wo = wo.update(
+                prev_timestamp=timestamp_prev, 
+                cur_timestamp=timestamp
+            )
+            
+            # Correction for robot and kaist datasets
+            if is_kaist:
+                t_wo[0, 0] = (-t_wo_raw[1]).item()
+                t_wo[1, 0] = (t_wo_raw[0]).item()
+                t_wo[2, 0] = 0.0
+            elif is_robot:
+                t_wo[0, 0] = (t_wo_raw[0]).item()
+                t_wo[1, 0] = (-t_wo_raw[1]).item()
+                t_wo[2, 0] = (t_wo_raw[2]).item()
+            else:
+                t_wo[0, 0] = 0.0
+                t_wo[1, 0] = 0.0
+                t_wo[2, 0] = 0.0
 
-        # 4. Logging (Handling None for t_wo)
-        # We use a fallback [0,0,0] if t_wo is None for consistent column count
+            # Needed to create the current scale
+            wo_pose[:3, :3] = R_wo
+            wo_pose[:3, 3] = t_wo.flatten()
+
+        # Verifies if it's the kitti dataset
+        #if is_robot or is_kaist:
+        #    current_scale = absscale.update(wo_pose)
+        #else:
+        current_scale = absscale.update(gt_pose)
+
+        # Update Visual Odometry and get the current pose estimation
+        R_vo, t_vo, rm_vo, rr_vo = vo.update(img, absolute_scale=current_scale)
+
+        # Logging (Handling None for t_wo)
         wo_log = t_wo if t_wo is not None else np.zeros((3, 1))
+
+        if filter_obj:
+            # 1. Predict step uses Visual Odometry (VO)
+            filter_obj.predict(t_vo)
+            
+            # 2. Measurement Update uses Wheel Odometry (WO)
+            if wo and t_wo is not None:
+                R_filtered, t_filtered = filter_obj.update(t_wo, yaw_wo)
+            else:
+                # Fallback just to extract the predicted state for plotting
+                t_filtered = np.zeros((3, 1))
+                x_est, z_est = filter_obj.get_state()
+                t_filtered[0, 0] = x_est
+                t_filtered[2, 0] = z_est
+        else:
+            t_filtered = None
 
         print(
             i,
@@ -156,17 +142,32 @@ def run(args):
             file=log_fopen,
         )
 
-        # 5. Visualization
+        # Visualization
         img1 = keypoints_plot(img, vo)
-        img2 = traj_plotter.update(t_vo, gt_pose[:, 3], wo_xyz=t_wo)
-
+        img2 = traj_plotter.update(t_vo, gt_pose[:, 3], wo_xyz=t_wo, filter_xyz=t_filtered)
+        
         cv2.imshow("keypoints", img1)
         cv2.imshow("trajectory", img2)
+
+        # RTSP Visualization
+        if rtsp_handler is not None and rtsp_handler.has_rtsp_images():
+            rtsp_display, diff_ms, closest_ts = rtsp_handler.get_rtsp_image(timestamp)
+            
+            if rtsp_display is not None:
+                # Draw synchronization info
+                rtsp_display = rtsp_handler.draw_sync_info(rtsp_display, diff_ms)
+                cv2.imshow("RTSP (Ground Truth Camera)", rtsp_display)
+
         if cv2.waitKey(10) == 27:
             break
  
     cv2.imwrite("results/" + fname + ".png", img2)
     log_fopen.close()
+    
+    # Save errors to CSV with detector and matcher names
+    detector_name = config["detector"].get("type", config["detector"].get("name", "unknown"))
+    matcher_name = config["matcher"].get("type", config["matcher"].get("name", "unknown"))
+    traj_plotter.save_errors_to_csv(config, detector_name=detector_name, matcher_name=matcher_name)
 
 
 if __name__ == "__main__":
@@ -177,11 +178,22 @@ if __name__ == "__main__":
         default="params/kitti_superpoint_supergluematch.yaml",
         help="config file",
     )
-    # Changed to optional flags (store_true)
     parser.add_argument(
         "--encoder",
         action="store_true",
         help="If set, Wheel Odometry will be used.",
+    )
+    parser.add_argument(
+        "--filter",
+        type=str,
+        choices=["lkf"],
+        default=None,
+        help="Filter to use: 'lkf' for Linear Kalman Filter",
+    )
+    parser.add_argument(
+        "--rtsp",
+        action="store_true",
+        help="If set, RTSP images will be displayed.",
     )
     parser.add_argument(
         "--logging",
