@@ -12,6 +12,9 @@ def image2tensor(frame, device):
 # --- VISUALIZATION ---
 # based on: https://github.com/magicleap/SuperGluePretrainedNetwork/blob/master/models/utils.py
 def plot_keypoints(image, kpts, scores=None):
+    if kpts is None or len(kpts) == 0:
+        return image
+    
     kpts = np.round(kpts).astype(int)
 
     if scores is not None:

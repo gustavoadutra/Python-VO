@@ -17,3 +17,4 @@ matcher:
     HAMMING: False  # Use L2 bruteforce for float descriptors
     first_N: 300
   distance_ratio: 0.75
+  

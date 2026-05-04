@@ -1,14 +1,14 @@
 dataset:
   name: ComplexUrbanDatasetLoader
   root_path: /home/aki/Desktop/old_cuscobot/
-  sequence: dataset_20260126_105418/
+  sequence: dataset_20260321_115430/
   start: 0
   is_robot: True
 
 detector:
   name: XfeatDetector
   cuda: 1
-  top_k: 4096
+  top_k: 1000
   detection_threshold: 0.05
 
 matcher:
@@ -18,3 +18,4 @@ matcher:
     HAMMING: False  # Use L2 bruteforce for float descriptors
     first_N: 300
   distance_ratio: 0.75
+  
