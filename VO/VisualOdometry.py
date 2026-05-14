@@ -98,7 +98,7 @@ class VisualOdometry(object):
                 
                 self.cur_t = self.cur_t + self.relative_motion
                 self.cur_R = R.dot(self.cur_R)
-
+                
             # 7. Success! Update reference for the next frame
             self.kptdescs["ref"] = self.kptdescs["cur"]
 

@@ -10,7 +10,7 @@ from utils.PinholeCamera import PinholeCamera
 
 
 class ComplexUrbanDatasetLoader:
-    # DataLoader for Complex Urban Dataset
+    # DataLoader for Complex Urban Dataset (Monocular)
 
     default_config = {
         "root_path": "/run/media/aki/OhShit/dataset_hdd/urban27",
@@ -33,15 +33,16 @@ class ComplexUrbanDatasetLoader:
         self.img_id = self.config["start"]
         self.img_N = len(self.img_files)
 
+        # Setup CLAHE for contrast enhancement
+        self.clahe = cv2.createCLAHE()
+
+
     def _setup_paths(self):
         self.dataset_path = Path(self.config["root_path"])
         self.sequence_path = self.dataset_path / self.config["sequence"]
 
-        target_cam = self.config["camera"]
-        if target_cam not in ["stereo_left", "stereo_right"]:
-            raise ValueError(f"Invalid camera selection: {target_cam}")
-
-        self.img_folder = self.sequence_path / target_cam
+        # Monocular camera
+        self.img_folder = self.sequence_path / "stereo_left"
 
     def _init_calibration(self):
         calib_file = self.sequence_path / "calibration" / "left.yaml"
@@ -56,30 +57,27 @@ class ComplexUrbanDatasetLoader:
 
         self.width = int(fs.getNode("image_width").real())
         self.height = int(fs.getNode("image_height").real())
-        self.K_raw = fs.getNode("camera_matrix").mat()
+        self.K = fs.getNode("camera_matrix").mat()
         self.D = fs.getNode("distortion_coefficients").mat()
-        self.R = fs.getNode("rectification_matrix").mat()
-        self.P = fs.getNode("projection_matrix").mat()
+        print(f"self.K:\n{self.K}")
+        print(f"self.D:\n{self.D}")
 
         fs.release()
 
+        new_K, roi = cv2.getOptimalNewCameraMatrix(self.K, self.D, (self.width, self.height), alpha=1, newImgSize=(self.width, self.height))
+        # Pre-compute remap maps for efficient undistortion
         self.map1, self.map2 = cv2.initUndistortRectifyMap(
-            self.K_raw,
-            self.D,
-            self.R,
-            self.P[:3, :3],
-            (self.width, self.height),
-            cv2.CV_32F,
+            self.K, self.D, None, new_K, (self.width, self.height), cv2.CV_32F
         )
 
         if PinholeCamera is not None:
             self.cam = PinholeCamera(
                 width=self.width,
                 height=self.height,
-                fx=self.P[0, 0],
-                fy=self.P[1, 1],
-                cx=self.P[0, 2],
-                cy=self.P[1, 2],
+                fx=self.K[0, 0],
+                fy=self.K[1, 1],
+                cx=self.K[0, 2],
+                cy=self.K[1, 2],
             )
 
     def _load_data(self):
@@ -124,16 +122,16 @@ class ComplexUrbanDatasetLoader:
             gps_df[col] = pd.to_numeric(gps_df[col])
 
         gps_data = gps_df.values
-        self.gps_ts_raw = gps_data[:, 0].astype(np.float64)
-        gps_x_raw = gps_data[:, 3].astype(np.float64)
-        gps_y_raw = gps_data[:, 4].astype(np.float64)
-        gps_z_raw = gps_data[:, 5].astype(np.float64)
+        self.gps_ts_raw = np.asarray(gps_data[:, 0], dtype=np.float64)
+        gps_x_raw = np.asarray(gps_data[:, 3], dtype=np.float64)
+        gps_y_raw = np.asarray(gps_data[:, 4], dtype=np.float64)
+        gps_z_raw = np.asarray(gps_data[:, 5], dtype=np.float64)
 
         if len(self.gps_ts_raw) == 0:
             self.gt_poses = []
             return
         
-        target_ts = self.timestamps_vo.astype(np.float64)
+        target_ts = np.asarray(self.timestamps_vo, dtype=np.float64)
         interp_x = np.interp(target_ts, self.gps_ts_raw, gps_x_raw)
         interp_y = np.interp(target_ts, self.gps_ts_raw, gps_y_raw)
         interp_z = np.interp(target_ts, self.gps_ts_raw, gps_z_raw)
@@ -186,10 +184,15 @@ class ComplexUrbanDatasetLoader:
                 if img is None:
                     img = np.zeros((560, 1280, 3), dtype=np.uint8)
 
-            img_rectified = cv2.remap(img, self.map1, self.map2, cv2.INTER_LINEAR)
-            # img_rectified = cv2.rotate(img, cv2.ROTATE_180)
+            img_undistorted = cv2.remap(img, self.map1, self.map2, cv2.INTER_LINEAR)
+            # Filter aplication
+            #img_filtered = cv2.bilateralFilter(img_undistorted, d=15, sigmaColor=75, sigmaSpace=75)
+            # Filter but with clahe
+            img_filtered = self.clahe.apply(cv2.cvtColor(img_undistorted, cv2.COLOR_BGR2GRAY))
+            img_filtered = cv2.cvtColor(img_filtered, cv2.COLOR_GRAY2BGR)
+
             self.img_id += 1
-            return img_rectified
+            return img_filtered
 
         raise StopIteration()
 

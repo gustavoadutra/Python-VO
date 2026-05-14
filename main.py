@@ -101,10 +101,10 @@ def run(args):
             wo_pose[:3, 3] = t_wo.flatten()
 
         # Verifies if it's the kitti dataset
-        #if is_robot or is_kaist:
-        #    current_scale = absscale.update(wo_pose)
-        #else:
-        current_scale = absscale.update(gt_pose)
+        if is_robot or is_kaist:
+            current_scale = absscale.update(wo_pose)
+        else:
+            current_scale = absscale.update(gt_pose)
 
         # Update Visual Odometry and get the current pose estimation
         R_vo, t_vo, rm_vo, rr_vo = vo.update(img, absolute_scale=current_scale)

@@ -28,7 +28,7 @@ class RSTPHandler:
     def _setup_rtsp_dir(self):
         """Index RTSP images from the dataset directory."""
         dataroot = self.config["dataset"].get("root_path", "") + self.config["dataset"].get("sequence", "")
-        self.rtsp_dir = os.path.join(dataroot, "rtsp_images_fixed")
+        self.rtsp_dir = os.path.join(dataroot, "rstp_titanium_3")
         
         if os.path.exists(self.rtsp_dir):
             print(f"[INFO] Indexing RTSP images from: {self.rtsp_dir}")
