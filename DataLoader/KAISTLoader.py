@@ -121,6 +121,8 @@ class ComplexUrbanDatasetLoader:
         for col in needed_cols:
             gps_df[col] = pd.to_numeric(gps_df[col])
 
+        # Transform to array and interpolate to timestamp match with
+        # source images
         gps_data = gps_df.values
         self.gps_ts_raw = np.asarray(gps_data[:, 0], dtype=np.float64)
         gps_x_raw = np.asarray(gps_data[:, 3], dtype=np.float64)
