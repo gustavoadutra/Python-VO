@@ -1,6 +1,6 @@
 dataset:
   name: ComplexUrbanDatasetLoader
-  root_path: /home/aki/Desktop/old_cuscobot/
+  root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/
   sequence: dataset_20260321_115430/
   start: 0
   is_robot: True
