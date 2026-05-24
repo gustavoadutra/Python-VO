@@ -45,6 +45,11 @@ def run(args):
     if args.ba:
         ba_config = config.get("ba", {})
         ba_config["window_size"] = args.ba_window
+        # Pass camera calibration from the loader
+        ba_config["fx"] = loader.cam.fx
+        ba_config["fy"] = loader.cam.fy
+        ba_config["cx"] = loader.cam.cx
+        ba_config["cy"] = loader.cam.cy
         ba_obj = GTSAMBundleAdjuster(ba_config)
 
     # Robot and KAIST datasets often have different axis conventions
