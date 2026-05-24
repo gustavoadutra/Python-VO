@@ -1,6 +1,6 @@
 dataset:
   name: KITTILoader
-  root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/KITTI/
+  root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/KITTI
   #root_path: test_imgs
   sequence: '00'
   start: 0
