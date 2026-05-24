@@ -1,7 +1,6 @@
 dataset:
   name: ComplexUrbanDatasetLoader
-  root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/urban27-dongtan/
-  sequence: 'urban27'
+  root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/  sequence: 'urban27'
   start: 0
   scale_factor: 0.2
   is_kaist: True  # Set to True for Kaist dataset, False for TUM dataset
