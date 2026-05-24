@@ -13,6 +13,7 @@ from DataLoader import create_dataloader
 from Detectors import create_detector
 from Matchers import create_matcher
 from VO.VisualOdometry import VisualOdometry, AbsoluteScaleComputer
+from VO.BundleAdjustment import GTSAMBundleAdjuster
 from WO.WheelOdometry import WheelOdometry
 from filters.LFK_PW_UV import KalmanFilter
 from utils.PlotTrajectory import TrajPlotter, keypoints_plot
@@ -38,6 +39,13 @@ def run(args):
     if args.filter == "lkf":
         filter_obj = KalmanFilter(config.get("filter", {}))
         filter_obj.initialize()
+
+    # Initialize bundle adjustment if requested
+    ba_obj = None
+    if args.ba:
+        ba_config = config.get("ba", {})
+        ba_config["window_size"] = args.ba_window
+        ba_obj = GTSAMBundleAdjuster(ba_config)
 
     # Robot and KAIST datasets often have different axis conventions
     is_robot = config["dataset"].get("is_robot", False)
@@ -107,7 +115,19 @@ def run(args):
             current_scale = absscale.update(gt_pose)
 
         # Update Visual Odometry and get the current pose estimation
-        R_vo, t_vo, rm_vo, rr_vo = vo.update(img, absolute_scale=current_scale)
+        R_vo, t_vo, rel_t_vo, rel_r_vo = vo.update(img, absolute_scale=current_scale)
+
+        # Try to optimize the local window with the bundle adjuster
+        ba_xyz = None
+        if ba_obj and rel_t_vo is not None and rel_r_vo is not None:
+            try:
+                _, ba_xyz = ba_obj.update(
+                    rel_r_vo,
+                    rel_t_vo,
+                    absolute_pose=(R_vo, t_vo),
+                )
+            except Exception as e:
+                print(f"[BA ERROR] {e}")
 
         # Logging (Handling None for t_wo)
         wo_log = t_wo if t_wo is not None else np.zeros((3, 1))
@@ -144,10 +164,13 @@ def run(args):
 
         # Visualization
         img1 = keypoints_plot(img, vo)
-        img2 = traj_plotter.update(t_vo, gt_pose[:, 3], wo_xyz=t_wo, filter_xyz=t_filtered)
+        img2 = traj_plotter.update(
+            t_vo, gt_pose[:, 3], wo_xyz=t_wo, filter_xyz=t_filtered, ba_xyz=ba_xyz
+        )
         
         cv2.imshow("keypoints", img1)
-        cv2.imshow("trajectory", img2)
+        trajectory_window = "trajectory_ba" if ba_obj else "trajectory"
+        cv2.imshow(trajectory_window, img2)
 
         # RTSP Visualization
         if rtsp_handler is not None and rtsp_handler.has_rtsp_images():
@@ -161,7 +184,8 @@ def run(args):
         if cv2.waitKey(10) == 27:
             break
  
-    cv2.imwrite("results/" + fname + ".png", img2)
+    output_image = f"results/{fname}{'_ba' if args.ba else ''}.png"
+    cv2.imwrite(output_image, img2)
     log_fopen.close()
     
     # Save errors to CSV with detector and matcher names
@@ -189,6 +213,17 @@ if __name__ == "__main__":
         choices=["lkf"],
         default=None,
         help="Filter to use: 'lkf' for Linear Kalman Filter",
+    )
+    parser.add_argument(
+        "--ba",
+        action="store_true",
+        help="If set, use GTSAM sliding-window bundle adjustment.",
+    )
+    parser.add_argument(
+        "--ba-window",
+        type=int,
+        default=7,
+        help="Sliding window length for GTSAM BA (default: 7 keyframes)",
     )
     parser.add_argument(
         "--rtsp",

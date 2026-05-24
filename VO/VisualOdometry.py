@@ -30,6 +30,7 @@ class VisualOdometry(object):
 
         # Relative motion for filter use
         self.relative_motion = np.zeros((3, 1))
+        self.relative_translation = np.zeros((3, 1))
         self.relative_rotation = np.eye(3)
 
     def update(self, image, absolute_scale=1.0):
@@ -90,15 +91,17 @@ class VisualOdometry(object):
             )
 
             # 6. Accumulate Pose
-            # Scale is applied to the translation vector t (unit vector) 
-            # rotated by current orientation
+            # Scale is applied to the translation vector t (unit vector)
+            # To preserve the correct relative transformation for BA, the
+            # translation should remain in the previous camera frame.
             if absolute_scale > 0:
-                self.relative_motion = absolute_scale * self.cur_R.dot(t)
+                self.relative_translation = absolute_scale * t
                 self.relative_rotation = R
-                
+                self.relative_motion = self.cur_R.dot(self.relative_translation)
+
                 self.cur_t = self.cur_t + self.relative_motion
                 self.cur_R = R.dot(self.cur_R)
-                
+
             # 7. Success! Update reference for the next frame
             self.kptdescs["ref"] = self.kptdescs["cur"]
 
@@ -110,7 +113,7 @@ class VisualOdometry(object):
             self.kptdescs["ref"] = self.kptdescs["cur"]
 
         self.index += 1
-        return self.cur_R, self.cur_t, self.relative_motion, self.relative_rotation
+        return self.cur_R, self.cur_t, self.relative_translation, self.relative_rotation
 
 class AbsoluteScaleComputer(object):
     def __init__(self):

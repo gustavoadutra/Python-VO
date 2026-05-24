@@ -190,11 +190,11 @@ class ComplexUrbanDatasetLoader:
             # Filter aplication
             #img_filtered = cv2.bilateralFilter(img_undistorted, d=15, sigmaColor=75, sigmaSpace=75)
             # Filter but with clahe
-            img_filtered = self.clahe.apply(cv2.cvtColor(img_undistorted, cv2.COLOR_BGR2GRAY))
-            img_filtered = cv2.cvtColor(img_filtered, cv2.COLOR_GRAY2BGR)
+            #img_filtered = self.clahe.apply(cv2.cvtColor(img_undistorted, cv2.COLOR_BGR2GRAY))
+            #img_filtered = cv2.cvtColor(img_filtered, cv2.COLOR_GRAY2BGR)
 
             self.img_id += 1
-            return img_filtered
+            return img_undistorted
 
         raise StopIteration()
 
