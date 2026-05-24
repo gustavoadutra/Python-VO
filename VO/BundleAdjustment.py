@@ -20,7 +20,7 @@ class GTSAMBundleAdjuster(object):
         # iSAM2 manages the windowing and sparsity dynamically, so we drop the manual `deque`
         parameters = gtsam.ISAM2Params()
         parameters.setRelinearizeThreshold(0.1)
-        parameters.setRelinearizeSkip(1)
+        parameters.relinearizeSkip = 1
         self.isam2 = gtsam.ISAM2(parameters)
 
         # 2. Camera Calibration (Crucial for BA)
