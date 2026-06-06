@@ -134,10 +134,15 @@ def run(args):
         ba_xyz = None
         if ba_obj and rel_t_vo is not None and rel_r_vo is not None:
             try:
+                # Get observations and landmarks from VO
+                observations, landmark_initials = vo.get_observations_for_ba()
+                
                 _, ba_xyz = ba_obj.update(
                     absolute_pose=(R_vo, t_vo),
                     relative_rotation=rel_r_vo,
                     relative_translation=rel_t_vo,
+                    observations=observations,
+                    landmark_initials=landmark_initials,
                 )
             except Exception as e:
                 print(f"[BA ERROR] {e}")

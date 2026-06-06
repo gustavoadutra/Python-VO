@@ -11,20 +11,18 @@ class GTSAMBundleAdjuster(object):
         if config is None:
             config = {}
 
-        if gtsam is None:
-            raise ImportError(
-                "GTSAM is not installed. Install it using `pip install gtsam`."
-            )
-
         # 1. Initialize iSAM2
-        # iSAM2 manages the windowing and sparsity dynamically, so we drop the manual `deque`
+        # iSAM2 manages the windowing and sparsity dynamically
         parameters = gtsam.ISAM2Params()
+        # Says if the optimizer should go back and adjust past variables because the drift is too high
+        # High means
         parameters.setRelinearizeThreshold(0.1)
         parameters.relinearizeSkip = 1
         self.isam2 = gtsam.ISAM2(parameters)
 
-        # 2. Camera Calibration (Crucial for BA)
+        # 2. Camera Calibration
         # Must be provided from the config file via the dataset loader
+        # To optimizer understand how 3D points project to 2D, 
         fx = float(config["fx"])
         fy = float(config["fy"])
         cx = float(config["cx"])
@@ -48,6 +46,7 @@ class GTSAMBundleAdjuster(object):
         self.last_pose = None
 
     def _pose3_from_rt(self, R, t):
+        # creates the pose 3d for the graph
         if isinstance(t, np.ndarray):
             t = np.asarray(t).reshape(3, 1)
             point = gtsam.Point3(float(t[0, 0]), float(t[1, 0]), float(t[2, 0]))
@@ -71,52 +70,72 @@ class GTSAMBundleAdjuster(object):
         """
         if absolute_pose is None:
             raise ValueError("absolute_pose must be provided.")
-            
+        
+        # Default empty lists/dicts if not provided
         observations = observations or []
         landmark_initials = landmark_initials or {}
 
         # iSAM2 requires us to only pass *new* factors and *new* values on each step
+        # Saves pose prior, odometry constrains and projection factors for the current keyframe
         new_factors = gtsam.NonlinearFactorGraph()
+        # current camera pose and any new landmarks observed in this frame
         new_values = gtsam.Values()
 
         # Add current pose to new values
         R_vo, t_vo = absolute_pose
+        # get current pose 3d
         current_pose = self._pose3_from_rt(R_vo, t_vo)
+        # creates the symbol for the current pose
         pose_symbol = gtsam.symbol('x', self.current_key)
+        print(f"Adding pose symbol: {pose_symbol} for keyframe {self.current_key}")
+        # add the new pose and its symbol
         new_values.insert(pose_symbol, current_pose)
 
         # 1. Pose Graph Factors (Odometry & Prior)
         if self.current_key == 0:
-            # Anchor the first frame
+            # Anchor the first frame, with its own noise
             new_factors.add(gtsam.PriorFactorPose3(pose_symbol, current_pose, self.noise_prior))
         else:
             # Add odometry constraint from the previous frame
             if relative_rotation is not None and relative_translation is not None:
+                # get the previous pose symbol
                 prev_symbol = gtsam.symbol('x', self.current_key - 1)
+                # creates the relative pose from the VO estimate
                 rel_pose = self._pose3_from_rt(relative_rotation, relative_translation)
+                print(f"Adding odometry factor: {prev_symbol} -> {pose_symbol}")
+                # saves the new factor between the previous and current pose with the relative pose and noise model
                 new_factors.add(
                     gtsam.BetweenFactorPose3(prev_symbol, pose_symbol, rel_pose, self.noise_odom)
                 )
 
         # 2. Bundle Adjustment Factors (3D landmarks projected to 2D)
+        # for each observation
+        # u is the horizontal pixel coordinate, v is the vertical pixel coordinate
         for lm_id, u, v in observations:
+            # creates the symbol for the landmark
             lm_symbol = gtsam.symbol('l', lm_id)
+            # creates the measurement for the 2d point in the image
             measurement = gtsam.Point2(u, v)
             
             # Add projection factor for this observation
+            print(f"Adding projection factor: {pose_symbol} -> {lm_symbol}")
             new_factors.add(
                 gtsam.GenericProjectionFactorCal3_S2(
                     measurement, self.noise_proj, pose_symbol, lm_symbol, self.calibration
                 )
             )
-
-            # If this is the first time we've seen this landmark, provide an initial 3D guess
+            print(f"Added projection factor for landmark {lm_id} observed at pixel ({u}, {v})")
+            # If this is the first time we've seen this landmark
+            # provide an initial 3D guess
             if lm_id not in self.seen_landmarks:
                 if lm_id not in landmark_initials:
                     raise ValueError(f"Initial 3D position missing for new landmark {lm_id}")
-                
+                # get 3d position for the new landmark
                 lx, ly, lz = landmark_initials[lm_id]
+                # creates the 3d point and it's simbol and adds it to the new values
                 new_values.insert(lm_symbol, gtsam.Point3(lx, ly, lz))
+                # mark as seen so we don't re-insert it in future frames
+                print(f"Adding new landmark symbol: {lm_symbol} for landmark ID {lm_id} at position ({lx}, {ly}, {lz})")
                 self.seen_landmarks.add(lm_id)
 
         # 3. Update iSAM2 and calculate the estimate
