@@ -33,7 +33,7 @@ class TrajPlotter(object):
         self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
         self.scale = 0.25 if not is_robot else 200  # Adjust scale for robot datasets
         
-    def update(self, est_xyz, gt_xyz, wo_xyz=None, filter_xyz=None, ba_xyz=None):
+    def update(self, est_xyz, gt_xyz, wo_xyz=None, filter_xyz=None, ba_xyz=None, image=None):
         """
         Updates the trajectory plot.
         :param est_xyz: Visual Odometry position
@@ -41,6 +41,7 @@ class TrajPlotter(object):
         :param wo_xyz: Wheel Odometry position (Optional)
         :param filter_xyz: Filter position (Optional)
         :param ba_xyz: Bundle Adjustment position (Optional)
+        :param image: Current frame image (Optional) - will be displayed alongside trajectory
         """
         x, z = est_xyz[0], est_xyz[2]
         gt_x, gt_z = gt_xyz[0], gt_xyz[2]
@@ -114,6 +115,17 @@ class TrajPlotter(object):
             cv2.circle(self.traj, (filter_x, filter_z), 1, (255, 255, 0), 1)
 
         # Draw error trajectories as lines connecting consecutive error positions
+        # GT trajectory (Red solid line)
+        if len(self.gt_positions) > 1:
+            prev_gt = self.gt_positions[-2]
+            curr_gt = self.gt_positions[-1]
+            cv2.line(self.traj,
+                    (int(prev_gt[0] * self.scale) + self.offset_x,
+                     int(prev_gt[1] * self.scale) + self.offset_y),
+                    (int(curr_gt[0] * self.scale) + self.offset_x,
+                     int(curr_gt[1] * self.scale) + self.offset_y),
+                    (0, 0, 255), 1)  # Red for GT trajectory
+
         # VO Error trajectory (Green dotted)
         if len(self.vo_errors) > 1:
             prev_vo = self.vo_positions[-2]
@@ -160,76 +172,87 @@ class TrajPlotter(object):
                      int(curr_filter[1] * self.scale) + self.offset_y),
                     (150, 150, 100), 1)  # Darker cyan for error trajectory
 
-        # Legend and Text
-        cv2.rectangle(self.traj, (10, 20), (600, 160), (0, 0, 0), -1)
-        text = "VO Error: %2.4fm" % (avg_vo_error)
+        # Legend and Text - showing errors with color legend
+        cv2.rectangle(self.traj, (10, 20), (600, 100), (0, 0, 0), -1)
+        
+        # Legend Colors with errors
         cv2.putText(
-            self.traj, text, (20, 40), cv2.FONT_HERSHEY_PLAIN, 1, (0, 255, 0), 1, 8
+            self.traj, "VO (Green) - %2.4fm" % avg_vo_error, (20, 40), cv2.FONT_HERSHEY_PLAIN, 1, (0, 255, 0), 1
+        )
+        cv2.putText(
+            self.traj, "GT (Red)", (280, 40), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 255), 1
         )
         
-        # Display WO error if available
-        y_offset = 50
-        if avg_wo_error is not None:
-            text_wo = "WO Error: %2.4fm" % (avg_wo_error)
-            cv2.putText(
-                self.traj, text_wo, (20, y_offset), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 0), 1, 8
-            )
-            y_offset += 15
-        
-        # Display Filter error if available
-        if avg_filter_error is not None:
-            text_filter = "Filter Error: %2.4fm" % (avg_filter_error)
-            cv2.putText(
-                self.traj, text_filter, (20, y_offset), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 0), 1, 8
-            )
-            y_offset += 15
-
-        # Display BA error if available
-        if avg_ba_error is not None:
-            text_ba = "BA Error: %2.4fm" % (avg_ba_error)
-            cv2.putText(
-                self.traj, text_ba, (20, y_offset), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 255), 1, 8
-            )
-
-        # Legend Colors
-        cv2.putText(
-            self.traj, "VO (Green)", (20, 80), cv2.FONT_HERSHEY_PLAIN, 1, (0, 255, 0), 1
-        )
-        cv2.putText(
-            self.traj, "GT (Red)", (150, 80), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 255), 1
-        )
+        legend_y = 55
         if wo_xyz is not None:
             cv2.putText(
                 self.traj,
-                "Wheel (Blue)",
-                (280, 80),
+                "Wheel (Blue) - %2.4fm" % avg_wo_error,
+                (20, legend_y),
                 cv2.FONT_HERSHEY_PLAIN,
                 1,
                 (255, 0, 0),
                 1,
             )
+            legend_y += 15
+        
         if filter_xyz is not None:
             cv2.putText(
                 self.traj,
-                "Filter (Cyan)",
-                (400, 80),
+                "Filter (Cyan) - %2.4fm" % avg_filter_error,
+                (20, legend_y),
                 cv2.FONT_HERSHEY_PLAIN,
                 1,
                 (255, 255, 0),
                 1,
             )
+            legend_y += 15
+        
         if ba_xyz is not None:
             cv2.putText(
                 self.traj,
-                "BA (Magenta)",
-                (520, 80),
+                "BA (Magenta) - %2.4fm" % avg_ba_error,
+                (20, legend_y),
                 cv2.FONT_HERSHEY_PLAIN,
                 1,
                 (255, 0, 255),
                 1,
             )
 
+        # Combine image and trajectory if image is provided
+        if image is not None:
+            return self._combine_image_and_trajectory(image)
+        
         return self.traj
+
+    def _combine_image_and_trajectory(self, image):
+        """
+        Combines the current frame image and trajectory plot side-by-side.
+        Pads image to match trajectory height if needed.
+        :param image: Current frame image
+        :return: Combined image (image on left, trajectory on right)
+        """
+        # Handle grayscale images
+        if len(image.shape) == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        
+        # Get dimensions
+        img_h, img_w = image.shape[:2]
+        traj_h, traj_w = self.traj.shape[:2]
+        
+        # If heights don't match, pad the image with black bars to match trajectory height
+        if img_h < traj_h:
+            pad_top = (traj_h - img_h) // 2
+            pad_bottom = traj_h - img_h - pad_top
+            image = cv2.copyMakeBorder(image, pad_top, pad_bottom, 0, 0, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+        elif img_h > traj_h:
+            # If image is taller, resize to match trajectory height
+            image = cv2.resize(image, (img_w, traj_h))
+        
+        # Combine horizontally (image on left, trajectory on right)
+        combined = np.hstack([image, self.traj])
+        
+        return combined
 
     def save_errors_to_csv(self, config, detector_name="", matcher_name="", output_folder="data"):
         # Create full path including sequence subdirectory

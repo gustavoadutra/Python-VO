@@ -1,0 +1,20 @@
+dataset:
+  name: ComplexUrbanDatasetLoader
+  root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/
+  #root_path: test_imgs
+  sequence: cusco_dataset_1/
+  start: 0
+  is_robot: True
+  use_direct_position: true
+
+detector:
+  name: XfeatDetector
+  cuda: 1
+  top_k: 2000
+  detection_threshold: 0.
+
+matcher:
+  name: LighterGlueMatcher
+  weights: /home/aki/Desktop/Python-VO/Detectors/accelerated_features/weights/xfeat-lighterglue.pt
+  min_conf: 0.0
+  cuda: 1

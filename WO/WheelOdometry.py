@@ -25,17 +25,21 @@ class WheelOdometry(object):
             / "encoder.csv"
         )
 
+        # Mode indicator: True for direct position (cusco), False for encoder ticks (kaist)
+        self.use_direct_position = config.get("use_direct_position", False)
+
         # Default Parameters (Prius approximations) if file not found
         self.ticks_per_rev = 980
         self.radius_left = 0.06
         self.radius_right = 0.06
         self.base_line = 0.335
 
-        # If parameter file is provided, load it immediately
-        if encoder_param_path:
+        # Always initialize conversion factors with defaults
+        self._update_conversion_factors()
+
+        # If parameter file is provided, load it to override defaults
+        if encoder_param_path.exists() and not self.use_direct_position:
             self.load_calibration(encoder_param_path)
-        else:
-            self._update_conversion_factors()
 
         # Internal state
         self.index = 0
@@ -43,11 +47,17 @@ class WheelOdometry(object):
         self.cur_theta = 0.0
         self.cur_R = np.identity(3)
         self.cur_t = np.zeros((3, 1))
+        self.prev_position = None
+        self.v = 0.0
+        self.w = 0.0
 
         # Data storage
         self.df = None
         if csv_path:
-            self.load_kaist_csv(csv_path)
+            if self.use_direct_position:
+                self.load_direct_position_csv(csv_path)
+            else:
+                self.load_kaist_csv(csv_path)
 
     def load_calibration(self, param_file):
         """Load calibration parameters from EncoderParameter.txt."""
@@ -96,6 +106,19 @@ class WheelOdometry(object):
             print(f"[INFO] Loaded {len(self.df)} encoder entries.")
         except FileNotFoundError:
             raise FileNotFoundError(f"Could not find encoder file at: {csv_path}")
+
+    def load_direct_position_csv(self, csv_path):
+        """Load CSV with direct position data [timestamp, image_filename, x, y, z] (cusco format)."""
+        print(f"[INFO] Loading direct position data from: {csv_path}")
+        try:
+            self.df = pd.read_csv(csv_path)
+            # Ensure columns exist
+            required_cols = ["timestamp", "x", "y", "z"]
+            if not all(col in self.df.columns for col in required_cols):
+                raise ValueError(f"CSV must contain columns: {required_cols}")
+            print(f"[INFO] Loaded {len(self.df)} position entries.")
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Could not find position file at: {csv_path}")
 
     def get_interpolated_ticks(self, target_time):
         """Linearly interpolate ticks at target_time."""
@@ -192,7 +215,11 @@ class WheelOdometry(object):
         return d_left, d_right
 
     def update(self, left_tick=None, right_tick=None, dt=None, prev_timestamp=None, cur_timestamp=None):
-        """Update pose using differential drive kinematics. Return (theta, R, t, w, v)."""
+        """Update pose using differential drive kinematics or direct position. Return (theta, R, t, w, v)."""
+        # Mode 3: Direct position (cusco dataset)
+        if self.use_direct_position and cur_timestamp is not None:
+            return self._update_from_direct_position(cur_timestamp)
+        
         # Mode 2: Timestamp-based (new, recommended)
         if prev_timestamp is not None and cur_timestamp is not None:
             dt = cur_timestamp - prev_timestamp
@@ -218,7 +245,8 @@ class WheelOdometry(object):
             raise ValueError(
                 "Must provide either:\n"
                 "  - Mode 1 (legacy): left_tick, right_tick, dt\n"
-                "  - Mode 2 (recommended): prev_timestamp, cur_timestamp"
+                "  - Mode 2 (recommended): prev_timestamp, cur_timestamp\n"
+                "  - Mode 3 (cusco direct position): cur_timestamp"
             )
         
         # Handle first frame
@@ -259,5 +287,60 @@ class WheelOdometry(object):
                 self.v = 0.0
                 self.w = 0.0
 
+        self.index += 1
+        return self.cur_theta, self.cur_R, self.cur_t, self.w, self.v
+
+    def _update_from_direct_position(self, cur_timestamp):
+        """Update pose from direct position data (cusco format)."""
+        if self.df is None:
+            raise RuntimeError("No position data loaded")
+        
+        # Find the closest row to cur_timestamp
+        idx = np.argmin(np.abs(self.df["timestamp"] - cur_timestamp))
+        cur_row = self.df.iloc[idx]
+        
+        cur_x = cur_row["x"]
+        cur_y = cur_row["y"]
+        cur_z = cur_row["z"]
+        
+        # Handle first frame
+        if self.index == 0:
+            self.cur_t = np.array([[cur_x], [cur_y], [cur_z]])
+            self.prev_position = np.array([cur_x, cur_y, cur_z])
+            self.cur_R = np.identity(3)
+            self.cur_theta = 0.0
+            self.v = 0.0
+            self.w = 0.0
+        else:
+            # Calculate displacement from previous position
+            cur_pos = np.array([cur_x, cur_y, cur_z])
+            displacement = cur_pos - self.prev_position
+            
+            # Update position
+            self.cur_t = cur_pos.reshape((3, 1))
+            
+            # Calculate angle from displacement
+            dx = displacement[0]
+            dy = displacement[1]
+            
+            # Calculate new heading angle
+            if np.linalg.norm(displacement[:2]) > 1e-6:
+                new_theta = np.arctan2(dy, dx)
+                d_theta = new_theta - self.cur_theta
+                
+                # Normalize angle to [-pi, pi]
+                d_theta = np.arctan2(np.sin(d_theta), np.cos(d_theta))
+                
+                self.cur_theta = new_theta
+                
+                # Update rotation matrix (2D rotation for yaw)
+                c, s = np.cos(self.cur_theta), np.sin(self.cur_theta)
+                self.cur_R = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+            else:
+                self.v = 0.0
+                self.w = 0.0
+            
+            self.prev_position = cur_pos
+        
         self.index += 1
         return self.cur_theta, self.cur_R, self.cur_t, self.w, self.v

@@ -1,0 +1,19 @@
+dataset:
+  name: KITTILoader
+  root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/
+  sequence: cusco_dataset_1/
+  start: 0
+
+detector:
+  name: XfeatDetector
+  top_k: 3000
+  detection_threshold: 0
+  cuda: 1
+
+matcher:
+  name: FrameByFrameMatcher
+  type: KNN
+  KNN:
+    HAMMING: False
+    first_N: 300
+  distance_ratio: 0.75

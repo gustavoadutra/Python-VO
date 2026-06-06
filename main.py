@@ -55,6 +55,7 @@ def run(args):
     # Robot and KAIST datasets often have different axis conventions
     is_robot = config["dataset"].get("is_robot", False)
     is_kaist = config["dataset"].get("is_kaist", False)
+    is_cusco = config["dataset"].get("use_direct_position", False)
 
     traj_plotter = TrajPlotter(is_robot=is_robot)
 
@@ -80,7 +81,10 @@ def run(args):
         gt_pose = loader.get_cur_pose()
         
         # Correcting the order of gt_pose for robot datasets 
-        if is_robot:
+        if is_cusco:
+            gt_pose[0] = -gt_pose[2] # x-axis
+            gt_pose[2] = -gt_pose[1] # y axis
+        elif is_robot:
             gt_pose[0], gt_pose[1] = gt_pose[1], gt_pose[0]
 
         # Wheel Odometry update
@@ -100,9 +104,13 @@ def run(args):
                 t_wo[0, 0] = (-t_wo_raw[1]).item()
                 t_wo[1, 0] = (t_wo_raw[0]).item()
                 t_wo[2, 0] = 0.0
+            elif is_cusco:
+                t_wo[0, 0] = (-t_wo_raw[1]).item()
+                t_wo[1, 0] = (t_wo_raw[0]).item()
+                t_wo[2, 0] = (t_wo_raw[2]).item()
             elif is_robot:
-                t_wo[0, 0] = (t_wo_raw[0]).item()
-                t_wo[1, 0] = (-t_wo_raw[1]).item()
+                t_wo[0, 0] = (t_wo_raw[0]).item() # x axis
+                t_wo[1, 0] = (-t_wo_raw[1]).item() # y axis
                 t_wo[2, 0] = (t_wo_raw[2]).item()
             else:
                 t_wo[0, 0] = 0.0
@@ -114,10 +122,10 @@ def run(args):
             wo_pose[:3, 3] = t_wo.flatten()
 
         # Verifies if it's the kitti dataset
-        if is_robot or is_kaist:
-            current_scale = absscale.update(wo_pose)
-        else:
-            current_scale = absscale.update(gt_pose)
+        #if is_robot or is_kaist:
+            #current_scale = absscale.update(wo_pose)
+        #else:
+        current_scale = absscale.update(gt_pose)
 
         # Update Visual Odometry and get the current pose estimation
         R_vo, t_vo, rel_t_vo, rel_r_vo = vo.update(img, absolute_scale=current_scale)
@@ -170,10 +178,9 @@ def run(args):
         # Visualization
         img1 = keypoints_plot(img, vo)
         img2 = traj_plotter.update(
-            t_vo, gt_pose[:, 3], wo_xyz=t_wo, filter_xyz=t_filtered, ba_xyz=ba_xyz
+            t_vo, gt_pose[:, 3], wo_xyz=t_wo, filter_xyz=t_filtered, ba_xyz=ba_xyz, image=img
         )
         
-        cv2.imshow("keypoints", img1)
         trajectory_window = "trajectory_ba" if ba_obj else "trajectory"
         cv2.imshow(trajectory_window, img2)
 
