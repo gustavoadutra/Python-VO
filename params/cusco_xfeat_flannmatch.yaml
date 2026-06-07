@@ -1,5 +1,5 @@
 dataset:
-  name: KITTILoader
+  name: ComplexUrbanDatasetLoader
   root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/
   sequence: cusco_dataset_1/
   start: 0

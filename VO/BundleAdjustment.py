@@ -3,8 +3,8 @@ import gtsam
 
 class GTSAMBundleAdjuster(object):
     """
-    Incremental Bundle Adjuster using GTSAM iSAM2.
-    Optimizes both camera poses and 3D landmark positions.
+    Incremental Bundle Adjuster using GTSAM iSAM2 with Delayed Initialization.
+    Optimizes both camera poses and 3D landmark positions without using artificial priors.
     """
 
     def __init__(self, config=None):
@@ -12,17 +12,14 @@ class GTSAMBundleAdjuster(object):
             config = {}
 
         # 1. Initialize iSAM2
-        # iSAM2 manages the windowing and sparsity dynamically
         parameters = gtsam.ISAM2Params()
-        # Says if the optimizer should go back and adjust past variables because the drift is too high
-        # High means
+        # Says if the optimizer should go back and adjust 
+        # past variables because the drift is too high
         parameters.setRelinearizeThreshold(0.1)
         parameters.relinearizeSkip = 1
         self.isam2 = gtsam.ISAM2(parameters)
 
         # 2. Camera Calibration
-        # Must be provided from the config file via the dataset loader
-        # To optimizer understand how 3D points project to 2D, 
         fx = float(config["fx"])
         fy = float(config["fy"])
         cx = float(config["cx"])
@@ -32,7 +29,7 @@ class GTSAMBundleAdjuster(object):
         # 3. Tuned Noise Models
         # [Roll, Pitch, Yaw, X, Y, Z] - Notice translation (XYZ) has higher uncertainty than rotation
         self.noise_prior = gtsam.noiseModel.Diagonal.Sigmas(
-            np.array([0.01, 0.01, 0.01, 0.1, 0.1, 0.1], dtype=float)
+            np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01], dtype=float)
         )
         self.noise_odom = gtsam.noiseModel.Diagonal.Sigmas(
             np.array([0.05, 0.05, 0.05, 0.2, 0.2, 0.2], dtype=float)
@@ -40,9 +37,19 @@ class GTSAMBundleAdjuster(object):
         # Projection noise (measured in pixels)
         pixel_noise = float(config.get("pixel_noise", 1.0))
         self.noise_proj = gtsam.noiseModel.Isotropic.Sigma(2, pixel_noise)
+        
+        # --- REDE DE SEGURANÇA GEOMÉTRICA ---
+        # Impede que pontos no horizonte (sem paralaxe) explodam a matriz
+        self.noise_landmark_prior = gtsam.noiseModel.Isotropic.Sigma(3, 0.05) 
 
         self.current_key = 0
-        self.seen_landmarks = set() # Track which 3D points are already in the graph
+        self.seen_landmarks = set() # Track which 3D points are FULLY in the graph
+        
+        # --- SALA DE ESPERA (Delayed Initialization Buffer) ---
+        # Armazena a primeira observação de um landmark: 
+        # lm_id -> {'pose_symbol': sym, 'u': u, 'v': v, 'initial_3d': (x,y,z)}
+        self.pending_landmarks = {} 
+        
         self.last_pose = None
 
     def _pose3_from_rt(self, R, t):
@@ -56,101 +63,109 @@ class GTSAMBundleAdjuster(object):
 
     def update(self, absolute_pose, relative_rotation=None, relative_translation=None, 
                observations=None, landmark_initials=None):
-        """
-        Add a new keyframe and landmarks, then incrementally optimize.
-
-        Args:
-            absolute_pose: tuple(R, t) current absolute pose estimate from VO.
-            relative_rotation: 3x3 rotation from previous to current frame (optional).
-            relative_translation: 3x1 translation from previous to current frame (optional).
-            observations: List of tuples (landmark_id, u_pixel, v_pixel).
-            landmark_initials: Dict mapping landmark_id -> (x, y, z) for newly seen landmarks.
-        Returns:
-            Tuple (R_opt, t_opt) for the optimized current pose.
-        """
+        
         if absolute_pose is None:
             raise ValueError("absolute_pose must be provided.")
         
-        # Default empty lists/dicts if not provided
         observations = observations or []
         landmark_initials = landmark_initials or {}
 
-        # iSAM2 requires us to only pass *new* factors and *new* values on each step
-        # Saves pose prior, odometry constrains and projection factors for the current keyframe
         new_factors = gtsam.NonlinearFactorGraph()
-        # current camera pose and any new landmarks observed in this frame
         new_values = gtsam.Values()
 
         # Add current pose to new values
         R_vo, t_vo = absolute_pose
-        # get current pose 3d
         current_pose = self._pose3_from_rt(R_vo, t_vo)
-        # creates the symbol for the current pose
         pose_symbol = gtsam.symbol('x', self.current_key)
-        print(f"Adding pose symbol: {pose_symbol} for keyframe {self.current_key}")
-        # add the new pose and its symbol
         new_values.insert(pose_symbol, current_pose)
 
         # 1. Pose Graph Factors (Odometry & Prior)
         if self.current_key == 0:
-            # Anchor the first frame, with its own noise
             new_factors.add(gtsam.PriorFactorPose3(pose_symbol, current_pose, self.noise_prior))
         else:
-            # Add odometry constraint from the previous frame
             if relative_rotation is not None and relative_translation is not None:
-                # get the previous pose symbol
                 prev_symbol = gtsam.symbol('x', self.current_key - 1)
-                # creates the relative pose from the VO estimate
                 rel_pose = self._pose3_from_rt(relative_rotation, relative_translation)
-                print(f"Adding odometry factor: {prev_symbol} -> {pose_symbol}")
-                # saves the new factor between the previous and current pose with the relative pose and noise model
                 new_factors.add(
                     gtsam.BetweenFactorPose3(prev_symbol, pose_symbol, rel_pose, self.noise_odom)
                 )
 
-        # 2. Bundle Adjustment Factors (3D landmarks projected to 2D)
-        # for each observation
-        # u is the horizontal pixel coordinate, v is the vertical pixel coordinate
+        # 2. Bundle Adjustment Factors (Parallax-Aware Delayed Initialization)
         for lm_id, u, v in observations:
-            # creates the symbol for the landmark
             lm_symbol = gtsam.symbol('l', lm_id)
-            # creates the measurement for the 2d point in the image
             measurement = gtsam.Point2(u, v)
             
-            # Add projection factor for this observation
-            print(f"Adding projection factor: {pose_symbol} -> {lm_symbol}")
-            new_factors.add(
-                gtsam.GenericProjectionFactorCal3_S2(
-                    measurement, self.noise_proj, pose_symbol, lm_symbol, self.calibration
+            if lm_id in self.seen_landmarks:
+                # Caso A: O landmark já está maduro e inserido no grafo.
+                new_factors.add(
+                    gtsam.GenericProjectionFactorCal3_S2(
+                        measurement, self.noise_proj, pose_symbol, lm_symbol, self.calibration
+                    )
                 )
-            )
-            print(f"Added projection factor for landmark {lm_id} observed at pixel ({u}, {v})")
-            # If this is the first time we've seen this landmark
-            # provide an initial 3D guess
-            if lm_id not in self.seen_landmarks:
+                
+            elif lm_id in self.pending_landmarks:
+                self.pending_landmarks[lm_id]['obs'].append((pose_symbol, u, v))
+                first_t = self.pending_landmarks[lm_id]['first_t']
+                distance = np.linalg.norm(t_vo - first_t)
+                
+                # Exige que o carro ande 0.5m E que o ponto tenha sido rastreado por pelo menos 3 frames
+                if distance > 0.01 and len(self.pending_landmarks[lm_id]['obs']) >= 3: 
+                    pending_data = self.pending_landmarks.pop(lm_id)
+                    
+                    # B.1: Inserir a estimativa 3D no grafo
+                    lx, ly, lz = pending_data['initial_3d']
+                    lm_point = gtsam.Point3(lx, ly, lz)
+                    new_values.insert(lm_symbol, lm_point)
+                    
+                    # Impede o colapso linear em pontos de fuga (movimento puramente frontal)
+                    new_factors.add(
+                        gtsam.PriorFactorPoint3(lm_symbol, lm_point, self.noise_landmark_prior)
+                    )
+                    
+                    # B.2: Adicionar TODAS as observações acumuladas
+                    for obs_pose_sym, obs_u, obs_v in pending_data['obs']:
+                        past_measurement = gtsam.Point2(obs_u, obs_v)
+                        new_factors.add(
+                            gtsam.GenericProjectionFactorCal3_S2(
+                                past_measurement, self.noise_proj, obs_pose_sym, lm_symbol, self.calibration
+                            )
+                        )
+                    
+                    self.seen_landmarks.add(lm_id)
+                    print(f"[BA INFO] Landmark {lm_id} maduro. Baseline: {distance:.2f}m. {len(pending_data['obs'])} observações.")                    
+            else:
+                # Caso C: Primeira vez que vemos esse ponto.
                 if lm_id not in landmark_initials:
-                    raise ValueError(f"Initial 3D position missing for new landmark {lm_id}")
-                # get 3d position for the new landmark
-                lx, ly, lz = landmark_initials[lm_id]
-                # creates the 3d point and it's simbol and adds it to the new values
-                new_values.insert(lm_symbol, gtsam.Point3(lx, ly, lz))
-                # mark as seen so we don't re-insert it in future frames
-                print(f"Adding new landmark symbol: {lm_symbol} for landmark ID {lm_id} at position ({lx}, {ly}, {lz})")
-                self.seen_landmarks.add(lm_id)
-
-        # 3. Update iSAM2 and calculate the estimate
-        self.isam2.update(new_factors, new_values)
+                    continue
+                    
+                # Cria o registro na sala de espera salvando a posição exata (t_vo) da primeira vista
+                self.pending_landmarks[lm_id] = {
+                    'first_t': t_vo.copy(), 
+                    'initial_3d': landmark_initials[lm_id],
+                    'obs': [(pose_symbol, u, v)]
+                }
+        # 3. Update iSAM2 and calculate the estimate (com proteção contra anomalias)
+        try:
+            # O GTSAM só será atualizado se houver novos fatores além do prior da câmera
+            if new_factors.size() > 0:
+                self.isam2.update(new_factors, new_values)
+                result = self.isam2.calculateEstimate()
+                
+                optimized_pose = result.atPose3(pose_symbol)
+                self.last_pose = optimized_pose
+        except Exception as e:
+            print(f"[GTSAM INTERNAL ERROR] Falha na otimização da keyframe {self.current_key}: {e}")
         
-        # calculateEstimate() gives us the fully optimized graph thus far
-        result = self.isam2.calculateEstimate()
-        
-        optimized_pose = result.atPose3(pose_symbol)
-        self.last_pose = optimized_pose
         self.current_key += 1
 
-        return optimized_pose.rotation().matrix(), np.array(
-            optimized_pose.translation()
-        ).reshape(3, 1)
+        # Retorna a pose otimizada se disponível, caso contrário devolve a odometria bruta
+        if self.last_pose is not None:
+            return self.last_pose.rotation().matrix(), np.array(
+                self.last_pose.translation()
+            ).reshape(3, 1)
+        else:
+            print(f"[BA WARNING] Otimização falhou para keyframe {self.current_key - 1}. Retornando odometria bruta.")
+            return R_vo, t_vo
 
     def get_last_pose(self):
         return self.last_pose
