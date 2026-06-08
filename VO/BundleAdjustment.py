@@ -32,7 +32,7 @@ class GTSAMBundleAdjuster(object):
             np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01], dtype=float)
         )
         self.noise_odom = gtsam.noiseModel.Diagonal.Sigmas(
-            np.array([0.05, 0.05, 0.05, 0.2, 0.2, 0.2], dtype=float)
+            np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01], dtype=float)
         )
         # Projection noise (measured in pixels)
         pixel_noise = float(config.get("pixel_noise", 1.0))
@@ -40,7 +40,7 @@ class GTSAMBundleAdjuster(object):
         
         # --- REDE DE SEGURANÇA GEOMÉTRICA ---
         # Impede que pontos no horizonte (sem paralaxe) explodam a matriz
-        self.noise_landmark_prior = gtsam.noiseModel.Isotropic.Sigma(3, 0.05) 
+        self.noise_landmark_prior = gtsam.noiseModel.Isotropic.Sigma(3, 0.005) 
 
         self.current_key = 0
         self.seen_landmarks = set() # Track which 3D points are FULLY in the graph
@@ -81,9 +81,11 @@ class GTSAMBundleAdjuster(object):
 
         # 1. Pose Graph Factors (Odometry & Prior)
         if self.current_key == 0:
+            print(f"[BA INFO] Inserindo pose inicial com prior absoluto.")
             new_factors.add(gtsam.PriorFactorPose3(pose_symbol, current_pose, self.noise_prior))
         else:
             if relative_rotation is not None and relative_translation is not None:
+                print(f"[BA INFO] Adicionando fator de odometria entre keyframe {self.current_key - 1} e {self.current_key}.")
                 prev_symbol = gtsam.symbol('x', self.current_key - 1)
                 rel_pose = self._pose3_from_rt(relative_rotation, relative_translation)
                 new_factors.add(
@@ -97,6 +99,7 @@ class GTSAMBundleAdjuster(object):
             
             if lm_id in self.seen_landmarks:
                 # Caso A: O landmark já está maduro e inserido no grafo.
+                print(f"[BA INFO] Adicionando observação do landmark {lm_id} na keyframe {self.current_key}.")
                 new_factors.add(
                     gtsam.GenericProjectionFactorCal3_S2(
                         measurement, self.noise_proj, pose_symbol, lm_symbol, self.calibration
@@ -109,7 +112,8 @@ class GTSAMBundleAdjuster(object):
                 distance = np.linalg.norm(t_vo - first_t)
                 
                 # Exige que o carro ande 0.5m E que o ponto tenha sido rastreado por pelo menos 3 frames
-                if distance > 0.01 and len(self.pending_landmarks[lm_id]['obs']) >= 3: 
+                # MODIFICAR ESSA LOGICA PARA USAR O NUMERO DE NOVOS MATCHES
+                if distance > 0.01 and len(self.pending_landmarks[lm_id]['obs']) >= 2: 
                     pending_data = self.pending_landmarks.pop(lm_id)
                     
                     # B.1: Inserir a estimativa 3D no grafo
