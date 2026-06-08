@@ -10,13 +10,29 @@ class GTSAMBundleAdjuster(object):
     def __init__(self, config=None):
         if config is None:
             config = {}
-
+        # Standard deviation in pixels for reprojection error
+        config.setdefault('pixel_noise', 0.5)
+        # Relinearization parameters for iSAM2, se pequeno o isam2 atualiza mais frequentemente, se grande ele é mais conservador
+        config.setdefault('relinearize_threshold', 0.01)
+        config.setdefault('relinearize_skip', 1)
+        # Confiança inicial para o prior absoluto da pose inicial 
+        config.setdefault('noise_prior_sigmas', [1e-4, 1e-4, 1e-4, 1e-4, 1e-4, 1e-4])  # [Roll, Pitch, Yaw, X, Y, Z]
+        config.setdefault('noise_odom_sigmas', [0.01, 0.01, 0.01, 0.1, 0.1, 0.01])
+        # O quanto que o ponto 3D pode variar em sua posição (em metros) quando for inserido no grafo, 
+        config.setdefault('noise_landmark_prior_sigma', 5)
+        # Parâmetros para a lógica de delayed initialization
+        config.setdefault('min_distance_threshold', 0.01)  # Distância mínima para considerar um ponto maduro em metros
+        config.setdefault('min_observations_threshold', 2)  # Número mínimo de observações para um ponto ser considerado maduro
+        
+        self.min_distance_threshold = config['min_distance_threshold']
+        self.min_observations_threshold = config['min_observations_threshold']
+        
         # 1. Initialize iSAM2
         parameters = gtsam.ISAM2Params()
         # Says if the optimizer should go back and adjust 
         # past variables because the drift is too high
-        parameters.setRelinearizeThreshold(0.1)
-        parameters.relinearizeSkip = 1
+        parameters.setRelinearizeThreshold(config['relinearize_threshold'])
+        parameters.relinearizeSkip = config['relinearize_skip']
         self.isam2 = gtsam.ISAM2(parameters)
 
         # 2. Camera Calibration
@@ -29,18 +45,18 @@ class GTSAMBundleAdjuster(object):
         # 3. Tuned Noise Models
         # [Roll, Pitch, Yaw, X, Y, Z] - Notice translation (XYZ) has higher uncertainty than rotation
         self.noise_prior = gtsam.noiseModel.Diagonal.Sigmas(
-            np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01], dtype=float)
+            np.array(config['noise_prior_sigmas'], dtype=float)
         )
         self.noise_odom = gtsam.noiseModel.Diagonal.Sigmas(
-            np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01], dtype=float)
+            np.array(config['noise_odom_sigmas'], dtype=float)
         )
         # Projection noise (measured in pixels)
         pixel_noise = float(config.get("pixel_noise", 1.0))
         self.noise_proj = gtsam.noiseModel.Isotropic.Sigma(2, pixel_noise)
         
         # --- REDE DE SEGURANÇA GEOMÉTRICA ---
-        # Impede que pontos no horizonte (sem paralaxe) explodam a matriz
-        self.noise_landmark_prior = gtsam.noiseModel.Isotropic.Sigma(3, 0.005) 
+        # Impede que pontos no horizonte (sem paralaxe) explodem a matriz
+        self.noise_landmark_prior = gtsam.noiseModel.Isotropic.Sigma(3, config['noise_landmark_prior_sigma'])
 
         self.current_key = 0
         self.seen_landmarks = set() # Track which 3D points are FULLY in the graph
@@ -112,8 +128,10 @@ class GTSAMBundleAdjuster(object):
                 distance = np.linalg.norm(t_vo - first_t)
                 
                 # Exige que o carro ande 0.5m E que o ponto tenha sido rastreado por pelo menos 3 frames
-                # MODIFICAR ESSA LOGICA PARA USAR O NUMERO DE NOVOS MATCHES
-                if distance > 0.01 and len(self.pending_landmarks[lm_id]['obs']) >= 2: 
+                # MODIFICAR ESSA LOGICA PARA USAR O NUMERO DE NOVOS MATCHES?
+                if (distance > self.min_distance_threshold and
+                    len(self.pending_landmarks[lm_id]['obs']) >= self.min_observations_threshold): 
+            
                     pending_data = self.pending_landmarks.pop(lm_id)
                     
                     # B.1: Inserir a estimativa 3D no grafo
