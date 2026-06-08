@@ -74,6 +74,10 @@ class VisualOdometry(object):
                            [0, 0, 1]], dtype=float) @ P2
 
             if absolute_scale > 0:
+                # 1. Salvar o estado anterior explícitamente!
+                prev_R = self.cur_R.copy()
+                prev_t = self.cur_t.copy()
+
                 # Acumular a pose GLOBAL
                 rel_t = absolute_scale * t
                 self.cur_t = self.cur_t + self.cur_R.dot(rel_t)
@@ -116,7 +120,7 @@ class VisualOdometry(object):
                             # TRANFORMAÇÃO PARA COORDENADAS GLOBAIS
                             # Multiplica pela rotação global ANTERIOR e soma a translação global ANTERIOR
                             # (Pois P1 estava na câmera anterior)
-                            prev_R = self.cur_R.T @ R.T # Apenas um truque para pegar a rotação global anterior se você não a salvou separadamente
+                            pt3d_global = prev_R.dot(pt3d_local) + prev_t
                             prev_t = self.cur_t - prev_R.dot(rel_t) 
                             
                             pt3d_global = prev_R.dot(pt3d_local) + prev_t
