@@ -44,7 +44,6 @@ def run(args):
     ba_obj = None
     if args.ba:
         ba_config = config.get("ba", {})
-        ba_config["window_size"] = args.ba_window
         # Pass camera calibration from the loader
         ba_config["fx"] = loader.cam.fx
         ba_config["fy"] = loader.cam.fy
@@ -235,12 +234,6 @@ if __name__ == "__main__":
         "--ba",
         action="store_true",
         help="If set, use GTSAM sliding-window bundle adjustment.",
-    )
-    parser.add_argument(
-        "--ba-window",
-        type=int,
-        default=7,
-        help="Sliding window length for GTSAM BA (default: 7 keyframes)",
     )
     parser.add_argument(
         "--rtsp",

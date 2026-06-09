@@ -11,18 +11,19 @@ class GTSAMBundleAdjuster(object):
         if config is None:
             config = {}
         # Standard deviation in pixels for reprojection error
-        config.setdefault('pixel_noise', 0.5)
+        config.setdefault('pixel_noise', 1.5)
         # Relinearization parameters for iSAM2, se pequeno o isam2 atualiza mais frequentemente, se grande ele é mais conservador
-        config.setdefault('relinearize_threshold', 0.01)
+        config.setdefault('relinearize_threshold', 0.8)
         config.setdefault('relinearize_skip', 1)
         # Confiança inicial para o prior absoluto da pose inicial 
-        config.setdefault('noise_prior_sigmas', [1e-4, 1e-4, 1e-4, 1e-4, 1e-4, 1e-4])  # [Roll, Pitch, Yaw, X, Y, Z]
-        config.setdefault('noise_odom_sigmas', [0.01, 0.01, 0.01, 0.1, 0.1, 0.01])
+        config.setdefault('noise_prior_sigmas', [0.05, 0.05, 0.05, 0.1, 0.1, 0.1])  # [Roll, Pitch, Yaw, X, Y, Z]
+        config.setdefault('noise_odom_sigmas', [0.08, 0.08, 0.08, 0.15, 0.15, 0.15])
         # O quanto que o ponto 3D pode variar em sua posição (em metros) quando for inserido no grafo, 
-        config.setdefault('noise_landmark_prior_sigma', 5)
+        # datasets com muita distancia precisam de distancias maiores para trabalhar
+        config.setdefault('noise_landmark_prior_sigma', 100)
         # Parâmetros para a lógica de delayed initialization
-        config.setdefault('min_distance_threshold', 0.01)  # Distância mínima para considerar um ponto maduro em metros
-        config.setdefault('min_observations_threshold', 2)  # Número mínimo de observações para um ponto ser considerado maduro
+        config.setdefault('min_distance_threshold', 8)  # Distância mínima para considerar um ponto maduro em metros
+        config.setdefault('min_observations_threshold', 10)  # Número mínimo de observações para um ponto ser considerado maduro
         
         self.min_distance_threshold = config['min_distance_threshold']
         self.min_observations_threshold = config['min_observations_threshold']
@@ -70,6 +71,7 @@ class GTSAMBundleAdjuster(object):
 
     def _pose3_from_rt(self, R, t):
         # creates the pose 3d for the graph
+        # Chama de rotacao e translacao e retorna um Pose3 do GTSAM
         if isinstance(t, np.ndarray):
             t = np.asarray(t).reshape(3, 1)
             point = gtsam.Point3(float(t[0, 0]), float(t[1, 0]), float(t[2, 0]))
@@ -100,13 +102,21 @@ class GTSAMBundleAdjuster(object):
             print(f"[BA INFO] Inserindo pose inicial com prior absoluto.")
             new_factors.add(gtsam.PriorFactorPose3(pose_symbol, current_pose, self.noise_prior))
         else:
+            prev_symbol = gtsam.symbol('x', self.current_key - 1)
+
             if relative_rotation is not None and relative_translation is not None:
                 print(f"[BA INFO] Adicionando fator de odometria entre keyframe {self.current_key - 1} e {self.current_key}.")
-                prev_symbol = gtsam.symbol('x', self.current_key - 1)
                 rel_pose = self._pose3_from_rt(relative_rotation, relative_translation)
-                new_factors.add(
-                    gtsam.BetweenFactorPose3(prev_symbol, pose_symbol, rel_pose, self.noise_odom)
-                )
+            else:
+                # Carro parado (absolute_scale == 0) ou falha no RANSAC
+                # Assume MOVIMENTO ZERO (Identidade)
+                print(f"[BA INFO] Carro parado. Inserindo odometria ZERO entre {self.current_key - 1} e {self.current_key}.")
+                rel_pose = gtsam.Pose3.Identity()
+
+            # SEMPRE ADICIONA A RESTRIÇÃO. Nunca deixe a câmera solta!
+            new_factors.add(
+                gtsam.BetweenFactorPose3(prev_symbol, pose_symbol, rel_pose, self.noise_odom)
+            )
 
         # 2. Bundle Adjustment Factors (Parallax-Aware Delayed Initialization)
         for lm_id, u, v in observations:
@@ -121,14 +131,13 @@ class GTSAMBundleAdjuster(object):
                         measurement, self.noise_proj, pose_symbol, lm_symbol, self.calibration
                     )
                 )
-                
+                 
             elif lm_id in self.pending_landmarks:
                 self.pending_landmarks[lm_id]['obs'].append((pose_symbol, u, v))
                 first_t = self.pending_landmarks[lm_id]['first_t']
                 distance = np.linalg.norm(t_vo - first_t)
                 
-                # Exige que o carro ande 0.5m E que o ponto tenha sido rastreado por pelo menos 3 frames
-                # MODIFICAR ESSA LOGICA PARA USAR O NUMERO DE NOVOS MATCHES?
+                # Exige que o carro ande uma dist minima E que o ponto tenha sido rastreado por pelo menos um num de frames
                 if (distance > self.min_distance_threshold and
                     len(self.pending_landmarks[lm_id]['obs']) >= self.min_observations_threshold): 
             

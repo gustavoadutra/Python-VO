@@ -47,9 +47,12 @@ class VisualOdometry(object):
             self.index += 1
             return self.cur_R, self.cur_t, None, None
 
+        t_rel = None
+        R_rel = None
+
         try:
-            # 2. Matching com o seu FrameByFrameMatcher
-            good_matches = self.matcher.match(self.kptdescs) # Retorna lista de [DMatch]
+            # 2. Matching
+            good_matches = self.matcher.match(self.kptdescs)
             matched_dict = self.matcher.get_good_keypoints(self.kptdescs)
             
             ref_pts = matched_dict["ref_keypoints"]
@@ -58,83 +61,79 @@ class VisualOdometry(object):
             if len(ref_pts) < 8:
                 raise ValueError("Not enough matches")
 
-            # 3. Recuperação de Pose
-            E, mask = cv2.findEssentialMat(cur_pts, ref_pts, focal=self.focal, pp=self.pp, method=cv2.RANSAC, prob=0.999, threshold=1.0)
-            _, R, t, mask = cv2.recoverPose(E, cur_pts, ref_pts, focal=self.focal, pp=self.pp)
+            # --- A GRANDE CORREÇÃO: ORDEM PADRÃO (ref_pts, cur_pts) ---
+            # Isso garante que R e t mapeiem pontos do frame ANTERIOR para o frame ATUAL
+            E, mask = cv2.findEssentialMat(ref_pts, cur_pts, focal=self.focal, pp=self.pp, method=cv2.RANSAC, prob=0.999, threshold=1.0)
+            _, R, t, mask = cv2.recoverPose(E, ref_pts, cur_pts, focal=self.focal, pp=self.pp)
 
             inlier_mask = mask.flatten().astype(bool)
             
-            # Matrizes de projeção para triangulação (Referencial local da câmera anterior)
-            P1 = np.array([[self.focal, 0, self.pp[0], 0],
-                           [0, self.focal, self.pp[1], 0],
-                           [0, 0, 1, 0]], dtype=float)
-            P2 = np.hstack((R, absolute_scale * t))
-            P2 = np.array([[self.focal, 0, self.pp[0]],
-                           [0, self.focal, self.pp[1]],
-                           [0, 0, 1]], dtype=float) @ P2
+            # Matriz Intrínseca (K)
+            K = np.array([[self.focal, 0, self.pp[0]],
+                          [0, self.focal, self.pp[1]],
+                          [0, 0, 1]], dtype=float)
 
-            if absolute_scale > 0:
-                # 1. Salvar o estado anterior explícitamente!
+            if absolute_scale > 0.1:
+                # 1. Pose Relativa (Câmera Atual no referencial da Câmera Anterior)
+                # Como R e t mapeiam X_cur = R * X_ref + t
+                # A pose da câmera Atual em relação à Anterior é a inversa:
+                R_rel = R.T
+                t_rel = -R.T.dot(absolute_scale * t)
+
+                # 2. Salvar estado global anterior
                 prev_R = self.cur_R.copy()
                 prev_t = self.cur_t.copy()
 
-                # Acumular a pose GLOBAL
-                rel_t = absolute_scale * t
-                self.cur_t = self.cur_t + self.cur_R.dot(rel_t)
-                self.cur_R = R.dot(self.cur_R)
+                # 3. Acumular globalmente de forma rigorosa
+                self.cur_R = prev_R.dot(R_rel)
+                self.cur_t = prev_t + prev_R.dot(t_rel)
 
                 # --- 4. DATA ASSOCIATION & TRIANGULAÇÃO ---
                 new_ref_idx_to_landmark_id = {}
-                self.current_observations = [] # Limpa as observações deste frame
+                self.current_observations = [] # Limpa observações
 
-                # Iterar apenas sobre os inliers que o RANSAC aprovou
+                # Matrizes de projeção (Referencial local da câmera anterior)
+                P1 = K @ np.hstack((np.eye(3), np.zeros((3, 1))))
+                # P2 usa R e t do OpenCV, que agora sim mapeiam de ref para cur
+                P2 = K @ np.hstack((R, absolute_scale * t))
+                # Filtra os inliers 
+                inliers = np.sum(inlier_mask)
+                print(f"Frame {self.index}: {inliers} inliers")
                 for idx, is_inlier in enumerate(inlier_mask):
                     if not is_inlier:
                         continue
                     
-                    # Pegar o objeto de match original do seu FrameByFrameMatcher
-                    # Nota: O seu matcher retorna uma lista de listas: [[match1], [match2]]
                     match = good_matches[idx][0] 
-                    q_idx = match.queryIdx # Índice no frame anterior
-                    t_idx = match.trainIdx # Índice no frame atual
-                    
+                    q_idx = match.queryIdx
+                    t_idx = match.trainIdx
                     u_cur, v_cur = cur_pts[idx]
-                    
-                    # A MÁGICA: Este ponto já existe?
                     if q_idx in self.ref_idx_to_landmark_id:
-                        # SIM! É um landmark conhecido.
                         lm_id = self.ref_idx_to_landmark_id[q_idx]
                         self.landmark_manager.add_observation(lm_id, self.index, u_cur, v_cur)
-                        
-                        # Passar o ID para o próximo frame
+                        # Linka o ponto 3d com o índice do keypoint atual para o BA
                         new_ref_idx_to_landmark_id[t_idx] = lm_id
+                        # salva a coord do pixel para o BA e a associação do landmark
                         self.current_observations.append((lm_id, u_cur, v_cur))
                     else:
-                        # NÃO! É uma nova quina/ponto encontrado.
-                        # Triangula (retorna coordenadas em relação à câmera anterior)
+                        # Triangulação correta resultará em valores locais coerentes
                         pt4d = cv2.triangulatePoints(P1, P2, ref_pts[idx].reshape(2,1), cur_pts[idx].reshape(2,1))
                         pt3d_local = (pt4d[:3, 0] / pt4d[3, 0]).reshape(3, 1)
 
-                        # Filtro de profundidade de segurança
+                        # Filtro de profundidade: Z não pode ser negativo e nem infinito
                         if 0.01 < pt3d_local[2, 0] < 100:
-                            # TRANFORMAÇÃO PARA COORDENADAS GLOBAIS
-                            # Multiplica pela rotação global ANTERIOR e soma a translação global ANTERIOR
-                            # (Pois P1 estava na câmera anterior)
-                            pt3d_global = prev_R.dot(pt3d_local) + prev_t
-                            prev_t = self.cur_t - prev_R.dot(rel_t) 
-                            
                             pt3d_global = prev_R.dot(pt3d_local) + prev_t
                             
                             descriptor = self.kptdescs["cur"]["descriptors"][t_idx]
-                            
                             lm_id = self.landmark_manager.add_landmark(
                                 pt3d_global.flatten(), descriptor, self.index, u_cur, v_cur
                             )
                             
                             new_ref_idx_to_landmark_id[t_idx] = lm_id
                             self.current_observations.append((lm_id, u_cur, v_cur))
+                        else:
+                            print(f"[VO WARNING] Triangulated point has invalid depth: {pt3d_local[2, 0]:.4f}. Skipping.")
+                            continue
 
-                # Atualiza o mapeamento para a próxima iteração
                 self.ref_idx_to_landmark_id = new_ref_idx_to_landmark_id
 
             self.kptdescs["ref"] = self.kptdescs["cur"]
@@ -142,11 +141,13 @@ class VisualOdometry(object):
         except Exception as e:
             print(f"Frame {self.index} Error: {e}")
             self.kptdescs["ref"] = self.kptdescs["cur"]
-            self.ref_idx_to_landmark_id = {} # Reseta o rastreamento local em caso de falha
+            self.ref_idx_to_landmark_id = {}
 
         self.index += 1
-        return self.cur_R, self.cur_t, rel_t if absolute_scale > 0 else None, R if absolute_scale > 0 else None
 
+        # IMPORTANTE: Retornamos t_rel e R_rel para que o GTSAM saiba o movimento real!
+        return self.cur_R, self.cur_t, t_rel, R_rel
+    
     def get_observations_for_ba(self):
         """
         Get observations (2D keypoint measurements) and landmarks for Bundle Adjustment.

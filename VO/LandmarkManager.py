@@ -19,5 +19,6 @@ class LandmarkManager:
 
     def add_observation(self, lm_id, frame_idx, u, v):
         """Adiciona uma nova observação 2D a um landmark existente."""
+        # dado um determinado ponto em outra imagem vai adicionar ao landmark a nova observação 
         if lm_id in self.observations:
             self.observations[lm_id].append((frame_idx, float(u), float(v)))
