@@ -1,9 +1,12 @@
 dataset:
   name: ComplexUrbanDatasetLoader
   root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/
+  #root_path: test_imgs
   sequence: cusco_dataset_1/
   start: 0
-
+  is_robot: True
+  use_direct_position: true
+  
 detector:
   name: XfeatDetector
   top_k: 3000
@@ -12,8 +15,8 @@ detector:
 
 matcher:
   name: FrameByFrameMatcher
-  type: KNN
-  KNN:
-    HAMMING: False
-    first_N: 300
+  type: FLANN
+  FLANN:
+    kdTrees: 5
+    searchChecks: 50
   distance_ratio: 0.75
