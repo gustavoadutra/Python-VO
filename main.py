@@ -40,16 +40,19 @@ def run(args):
         filter_obj = KalmanFilter(config.get("filter", {}))
         filter_obj.initialize()
 
-    # Initialize bundle adjustment if requested
+    vo = VisualOdometry(detector, matcher, loader.cam)
+
+    # Initialize bundle adjustment if requested and propagate the flag to VO
     ba_obj = None
     if args.ba:
         ba_config = config.get("ba", {})
-        # Pass camera calibration from the loader
         ba_config["fx"] = loader.cam.fx
         ba_config["fy"] = loader.cam.fy
         ba_config["cx"] = loader.cam.cx
         ba_config["cy"] = loader.cam.cy
         ba_obj = GTSAMBundleAdjuster(ba_config)
+        # Avisa ao VO que deve manter observações e chamar add_observation
+        vo.set_ba_active(True)
 
     # Robot and KAIST datasets often have different axis conventions
     is_robot = config["dataset"].get("is_robot", False)
@@ -67,8 +70,6 @@ def run(args):
 
     fname = args.config.split("/")[-1].split(".")[0]
     log_fopen = open("results/" + fname + ".txt", mode="a")
-    
-    vo = VisualOdometry(detector, matcher, loader.cam)
 
     # Initialize RTSP Handler
     rtsp_handler = None
@@ -78,27 +79,24 @@ def run(args):
     # Main loop
     for i, img in enumerate(loader):
         gt_pose = loader.get_cur_pose()
-        
-        # Correcting the order of gt_pose for robot datasets 
+
+        # Correcting the order of gt_pose for robot datasets
         if is_cusco:
-            gt_pose[0] = -gt_pose[2] # x-axis
-            gt_pose[2] = -gt_pose[1] # y axis
+            gt_pose[0] = -gt_pose[2]
+            gt_pose[2] = -gt_pose[1]
         elif is_robot:
             gt_pose[0], gt_pose[1] = gt_pose[1], gt_pose[0]
 
         # Wheel Odometry update
-        # It's interpolated so no need to worry about missing timestamps
         if wo:
-            # Used to synchronize with RTSP frames and velocity from WO
             timestamp = loader.times[i]
             timestamp_prev = loader.times[i - 1] if i > 0 else timestamp
-            
+
             yaw_wo, R_wo, t_wo_raw, w_wo, v_wo = wo.update(
-                prev_timestamp=timestamp_prev, 
+                prev_timestamp=timestamp_prev,
                 cur_timestamp=timestamp
             )
-            
-            # Correction for robot and kaist datasets
+
             if is_kaist:
                 t_wo[0, 0] = (-t_wo_raw[1]).item()
                 t_wo[1, 0] = (t_wo_raw[0]).item()
@@ -108,34 +106,28 @@ def run(args):
                 t_wo[1, 0] = (t_wo_raw[0]).item()
                 t_wo[2, 0] = (t_wo_raw[2]).item()
             elif is_robot:
-                t_wo[0, 0] = (t_wo_raw[0]).item() # x axis
-                t_wo[1, 0] = (-t_wo_raw[1]).item() # y axis
+                t_wo[0, 0] = (t_wo_raw[0]).item()
+                t_wo[1, 0] = (-t_wo_raw[1]).item()
                 t_wo[2, 0] = (t_wo_raw[2]).item()
             else:
                 t_wo[0, 0] = 0.0
                 t_wo[1, 0] = 0.0
                 t_wo[2, 0] = 0.0
 
-            # Needed to create the current scale
             wo_pose[:3, :3] = R_wo
             wo_pose[:3, 3] = t_wo.flatten()
 
-        # Verifies if it's the kitti dataset
-        #if is_robot or is_kaist:
-            #current_scale = absscale.update(wo_pose)
-        #else:
         current_scale = absscale.update(gt_pose)
 
-        # Update Visual Odometry and get the current pose estimation
+        # Update Visual Odometry
         R_vo, t_vo, rel_t_vo, rel_r_vo = vo.update(img, absolute_scale=current_scale)
 
-        # Try to optimize the local window with the bundle adjuster
+        # Bundle Adjustment (só quando --ba foi passado)
         ba_xyz = None
         if ba_obj and rel_t_vo is not None and rel_r_vo is not None:
             try:
-                # Get observations and landmarks from VO
                 observations, landmark_initials = vo.get_observations_for_ba()
-                
+
                 _, ba_xyz = ba_obj.update(
                     absolute_pose=(R_vo, t_vo),
                     relative_rotation=rel_r_vo,
@@ -146,18 +138,15 @@ def run(args):
             except Exception as e:
                 print(f"[BA ERROR] {e}")
 
-        # Logging (Handling None for t_wo)
+        # Logging
         wo_log = t_wo if t_wo is not None else np.zeros((3, 1))
 
         if filter_obj:
-            # 1. Predict step uses Visual Odometry (VO)
             filter_obj.predict(t_vo)
-            
-            # 2. Measurement Update uses Wheel Odometry (WO)
+
             if wo and t_wo is not None:
                 R_filtered, t_filtered = filter_obj.update(t_wo, yaw_wo)
             else:
-                # Fallback just to extract the predicted state for plotting
                 t_filtered = np.zeros((3, 1))
                 x_est, z_est = filter_obj.get_state()
                 t_filtered[0, 0] = x_est
@@ -184,27 +173,24 @@ def run(args):
         img2 = traj_plotter.update(
             t_vo, gt_pose[:, 3], wo_xyz=t_wo, filter_xyz=t_filtered, ba_xyz=ba_xyz, image=img
         )
-        
+
         trajectory_window = "trajectory_ba" if ba_obj else "trajectory"
         cv2.imshow(trajectory_window, img2)
 
-        # RTSP Visualization
         if rtsp_handler is not None and rtsp_handler.has_rtsp_images():
             rtsp_display, diff_ms, closest_ts = rtsp_handler.get_rtsp_image(timestamp)
-            
+
             if rtsp_display is not None:
-                # Draw synchronization info
                 rtsp_display = rtsp_handler.draw_sync_info(rtsp_display, diff_ms)
                 cv2.imshow("RTSP (Ground Truth Camera)", rtsp_display)
 
         if cv2.waitKey(10) == 27:
             break
- 
+
     output_image = f"results/{fname}{'_ba' if args.ba else ''}.png"
     cv2.imwrite(output_image, img2)
     log_fopen.close()
-    
-    # Save errors to CSV with detector and matcher names
+
     detector_name = config["detector"].get("type", config["detector"].get("name", "unknown"))
     matcher_name = config["matcher"].get("type", config["matcher"].get("name", "unknown"))
     traj_plotter.save_errors_to_csv(config, detector_name=detector_name, matcher_name=matcher_name)
