@@ -69,16 +69,15 @@ class ComplexUrbanDatasetLoader:
         self.map1, self.map2 = cv2.initUndistortRectifyMap(
             self.K, self.D, None, new_K, (self.width, self.height), cv2.CV_32F
         )
-
-        if PinholeCamera is not None:
-            self.cam = PinholeCamera(
-                width=self.width,
-                height=self.height,
-                fx=self.K[0, 0],
-                fy=self.K[1, 1],
-                cx=self.K[0, 2],
-                cy=self.K[1, 2],
-            )
+        # atualiza os novos valores de k para a classe PinholeCamera
+        self.cam = PinholeCamera(
+            width=self.width,
+            height=self.height,
+            fx=new_K[0, 0],
+            fy=new_K[1, 1],
+            cx=new_K[0, 2],
+            cy=new_K[1, 2],
+        )
 
     def _load_data(self):
         # Load timestamps from CSV or fallback to image folder
