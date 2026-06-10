@@ -3,10 +3,7 @@ import cv2
 import argparse
 import yaml
 import logging
-import os
-import csv
 
-from utils.tools import plot_keypoints
 from utils.RSTPHandler import RSTPHandler
 
 from DataLoader import create_dataloader
