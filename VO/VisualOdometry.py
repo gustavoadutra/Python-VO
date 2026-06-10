@@ -41,6 +41,9 @@ class VisualOdometry(object):
         self.min_depth = 0.001  # 10 cm
         self.max_depth = 100.0  # 100 m
 
+        # Min 3D points to PNP
+        self.min_3d_pnp_points = 40
+
     def set_ba_active(self, active: bool):
         self.ba_active = active
         if not active:
