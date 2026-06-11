@@ -12,7 +12,6 @@ from Matchers import create_matcher
 from VO.VisualOdometry import VisualOdometry, AbsoluteScaleComputer
 from VO.BundleAdjustment import GTSAMBundleAdjuster
 from WO.WheelOdometry import WheelOdometry
-from filters.LFK_PW_UV import KalmanFilter
 from utils.PlotTrajectory import TrajPlotter, keypoints_plot
 
 
@@ -30,12 +29,6 @@ def run(args):
     loader = create_dataloader(config["dataset"])
     detector = create_detector(config["detector"])
     matcher = create_matcher(config["matcher"])
-
-    # Initialize the filter
-    filter_obj = None
-    if args.filter == "lkf":
-        filter_obj = KalmanFilter(config.get("filter", {}))
-        filter_obj.initialize()
 
     vo = VisualOdometry(detector, matcher, loader.cam)
 
@@ -138,19 +131,6 @@ def run(args):
         # Logging
         wo_log = t_wo if t_wo is not None else np.zeros((3, 1))
 
-        if filter_obj:
-            filter_obj.predict(t_vo)
-
-            if wo and t_wo is not None:
-                R_filtered, t_filtered = filter_obj.update(t_wo, yaw_wo)
-            else:
-                t_filtered = np.zeros((3, 1))
-                x_est, z_est = filter_obj.get_state()
-                t_filtered[0, 0] = x_est
-                t_filtered[2, 0] = z_est
-        else:
-            t_filtered = None
-
         print(
             i,
             t_vo[0, 0],
@@ -168,7 +148,7 @@ def run(args):
         # Visualization
         img1 = keypoints_plot(img, vo)
         img2 = traj_plotter.update(
-            t_vo, gt_pose[:, 3], wo_xyz=t_wo, filter_xyz=t_filtered, ba_xyz=ba_xyz, image=img
+            t_vo, gt_pose[:, 3], wo_xyz=t_wo, ba_xyz=ba_xyz, image=img
         )
 
         trajectory_window = "trajectory_ba" if ba_obj else "trajectory"
@@ -205,13 +185,6 @@ if __name__ == "__main__":
         "--encoder",
         action="store_true",
         help="If set, Wheel Odometry will be used.",
-    )
-    parser.add_argument(
-        "--filter",
-        type=str,
-        choices=["lkf"],
-        default=None,
-        help="Filter to use: 'lkf' for Linear Kalman Filter",
     )
     parser.add_argument(
         "--ba",

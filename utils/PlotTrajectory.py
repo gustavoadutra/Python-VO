@@ -19,11 +19,9 @@ class TrajPlotter(object):
         self.errors = []
         self.vo_errors = []
         self.wo_errors = []
-        self.filter_errors = []
         self.ba_errors = []
         self.vo_positions = []
         self.wo_positions = []
-        self.filter_positions = []
         self.ba_positions = []
         self.gt_positions = []
         self.is_robot = is_robot
@@ -33,13 +31,12 @@ class TrajPlotter(object):
         self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
         self.scale = 0.25 if not is_robot else 200  # Adjust scale for robot datasets
         
-    def update(self, est_xyz, gt_xyz, wo_xyz=None, filter_xyz=None, ba_xyz=None, image=None):
+    def update(self, est_xyz, gt_xyz, wo_xyz=None, ba_xyz=None, image=None):
         """
         Updates the trajectory plot.
         :param est_xyz: Visual Odometry position
         :param gt_xyz: Ground Truth position
         :param wo_xyz: Wheel Odometry position (Optional)
-        :param filter_xyz: Filter position (Optional)
         :param ba_xyz: Bundle Adjustment position (Optional)
         :param image: Current frame image (Optional) - will be displayed alongside trajectory
         """
@@ -70,15 +67,6 @@ class TrajPlotter(object):
             self.wo_positions.append([float(np.asarray(wo_xyz[0]).flat[0]), float(np.asarray(wo_xyz[1]).flat[0])])
             avg_wo_error = np.mean(np.array(self.wo_errors))
 
-        # Calculate Filter error if available
-        avg_filter_error = None
-        if filter_xyz is not None:
-            filter_est = np.array([filter_xyz[0], filter_xyz[2]]).reshape(2)
-            filter_error = np.linalg.norm(filter_est - gt)
-            self.filter_errors.append(filter_error)
-            self.filter_positions.append([float(np.asarray(filter_xyz[0]).flat[0]), float(np.asarray(filter_xyz[2]).flat[0])])
-            avg_filter_error = np.mean(np.array(self.filter_errors))
-
         avg_ba_error = None
         if ba_xyz is not None:
             ba_est = np.array([ba_xyz[0], ba_xyz[2]]).reshape(2)
@@ -106,13 +94,6 @@ class TrajPlotter(object):
                 int(wo_xyz[1].item() * self.scale) + self.offset_y,
             )
             cv2.circle(self.traj, (wo_x, wo_z), 1, (255, 0, 0), 1)
-
-        if filter_xyz is not None:
-            filter_x, filter_z = (
-                int(filter_xyz[0].item() * self.scale) + self.offset_x,
-                int(filter_xyz[2].item() * self.scale) + self.offset_y,
-            )
-            cv2.circle(self.traj, (filter_x, filter_z), 1, (255, 255, 0), 1)
 
         # Draw error trajectories as lines connecting consecutive error positions
         # GT trajectory (Red solid line)
@@ -161,16 +142,6 @@ class TrajPlotter(object):
                      int(curr_ba[1] * self.scale) + self.offset_y),
                     (255, 0, 255), 1)  # Magenta for BA trajectory
 
-        # Filter Error trajectory (Yellow dotted)
-        if len(self.filter_errors) > 1 and filter_xyz is not None:
-            prev_filter = self.filter_positions[-2]
-            curr_filter = self.filter_positions[-1]
-            cv2.line(self.traj,
-                    (int(prev_filter[0] * self.scale) + self.offset_x,
-                     int(prev_filter[1] * self.scale) + self.offset_y),
-                    (int(curr_filter[0] * self.scale) + self.offset_x,
-                     int(curr_filter[1] * self.scale) + self.offset_y),
-                    (150, 150, 100), 1)  # Darker cyan for error trajectory
 
         # Legend and Text - showing errors with color legend
         cv2.rectangle(self.traj, (10, 20), (600, 100), (0, 0, 0), -1)
@@ -195,19 +166,7 @@ class TrajPlotter(object):
                 1,
             )
             legend_y += 15
-        
-        if filter_xyz is not None:
-            cv2.putText(
-                self.traj,
-                "Filter (Cyan) - %2.4fm" % avg_filter_error,
-                (20, legend_y),
-                cv2.FONT_HERSHEY_PLAIN,
-                1,
-                (255, 255, 0),
-                1,
-            )
-            legend_y += 15
-        
+
         if ba_xyz is not None:
             cv2.putText(
                 self.traj,
@@ -265,7 +224,7 @@ class TrajPlotter(object):
         base_name = f"{suffix}_errors.csv" if suffix else "errors.csv"
         csv_filename = os.path.join(seq_folder, base_name)
         
-        max_len = max(len(self.vo_errors), len(self.wo_errors), len(self.filter_errors), len(self.ba_errors))
+        max_len = max(len(self.vo_errors), len(self.wo_errors), len(self.ba_errors))
         
         with open(csv_filename, mode='w', newline='') as csv_file:
             if detector_name or matcher_name:
@@ -281,7 +240,6 @@ class TrajPlotter(object):
                     'Frame': i,
                     'VO_Error': self.vo_errors[i] if i < len(self.vo_errors) else '',
                     'WO_Error': self.wo_errors[i] if i < len(self.wo_errors) else '',
-                    'FILTER_Error': self.filter_errors[i] if i < len(self.filter_errors) else '',
                     'BA_Error': self.ba_errors[i] if i < len(self.ba_errors) else '',
                 })
         
