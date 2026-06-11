@@ -32,6 +32,11 @@ class VisualOdometry(object):
         self.ba_active = False
         self.enable_pnp_conf = enable_pnp
 
+        self.min_3d_points = 10
+        self.min_absolute_scale = 0.0001
+        self.min_depth = 0.01  # 10 cm
+        self.max_depth = 100.0  # 100 m
+
     def set_ba_active(self, active: bool):
         self.ba_active = active
         if not active:
@@ -65,7 +70,7 @@ class VisualOdometry(object):
         R_rel = None
 
         try:
-            # 2. Matching
+            # Matching
             good_matches = self.matcher.match(self.kptdescs)
             matched_dict = self.matcher.get_good_keypoints(self.kptdescs)
 
@@ -98,13 +103,13 @@ class VisualOdometry(object):
             # =========================================================
             # CAMINHO 1: PnP — usa landmarks 3D já triangulados
             # =========================================================
-            if self.enable_pnp_conf and len(object_points_3d) >= 15:
+            if self.enable_pnp_conf and len(object_points_3d) >= self.min_3d_points:
                 success, rvec, tvec, inliers = cv2.solvePnPRansac(
                     objectPoints=object_points_3d,
                     imagePoints=image_points_2d,
                     cameraMatrix=self.K,
                     distCoeffs=None,
-                    flags=cv2.SOLVEPNP_ITERATIVE,
+                    flags=cv2.SOLVEPNP_EPNP,
                     reprojectionError=2.0
                 )
 
@@ -152,7 +157,7 @@ class VisualOdometry(object):
 
                 inlier_mask = mask.flatten().astype(bool)
 
-                if absolute_scale > 0:
+                if absolute_scale > self.min_absolute_scale:
                     R_rel = R.T
                     t_rel = -R.T.dot(absolute_scale * t)
 
@@ -170,6 +175,8 @@ class VisualOdometry(object):
                     P2 = self.K @ np.hstack((R, absolute_scale * t))
 
                     print(f"Frame {self.index}: {np.sum(inlier_mask)} inliers")
+
+                    # Triangulação e atualização de landmarks
                     if self.ba_active or self.enable_pnp_conf:
                         for idx, is_inlier in enumerate(inlier_mask):
                             if not is_inlier:
@@ -185,7 +192,7 @@ class VisualOdometry(object):
                                 lm_id = self.ref_idx_to_landmark_id[q_idx]
                                 self._track_landmark(lm_id, t_idx, u_cur, v_cur, new_ref_idx_to_landmark_id)
                             
-                            # OTIMIZAÇÃO: Só triangula se o PnP estiver ativado ou BA ligado
+                            # Só triangula se o PnP estiver ativado ou BA ligado
                             elif self.enable_pnp_conf or self.ba_active:
                                 pt4d = cv2.triangulatePoints(
                                     P1, P2,
@@ -194,8 +201,13 @@ class VisualOdometry(object):
                                 )
                                 pt3d_local = (pt4d[:3, 0] / pt4d[3, 0]).reshape(3, 1)
 
-                                if not (0.01 < pt3d_local[2, 0] < 100):
-                                    print(f"[VO WARNING] Profundidade inválida: {pt3d_local[2, 0]:.4f}. Ignorando.")
+                                # Calculo de profundidade para filtragem do ponto triangulado
+                                # 1 metro ate 100 metros 
+                                if not (self.min_depth < pt3d_local[2, 0] < self.max_depth):
+                                    if pt3d_local[2, 0] <= self.min_depth:
+                                        print(f"[VO WARNING] Profundidade abaixo do limite: {pt3d_local[2, 0]:.4f}. Ignorando.")
+                                    else:
+                                        print(f"[VO WARNING] Profundidade acima do limite: {pt3d_local[2, 0]:.4f}. Ignorando.")
                                     continue
 
                                 pt3d_global = prev_R.dot(pt3d_local) + prev_t
