@@ -30,7 +30,7 @@ def run(args):
     detector = create_detector(config["detector"])
     matcher = create_matcher(config["matcher"])
 
-    vo = VisualOdometry(detector, matcher, loader.cam)
+    vo = VisualOdometry(detector, matcher, loader.cam, enable_pnp=not args.no_pnp)
 
     # Initialize bundle adjustment if requested and propagate the flag to VO
     ba_obj = None
@@ -201,6 +201,11 @@ if __name__ == "__main__":
         type=str,
         default="INFO",
         help="logging level: NOTSET, DEBUG, INFO, WARNING, ERROR, CRITICAL",
+    )
+    parser.add_argument(
+        "--no-pnp",
+        action="store_true",
+        help="If set, PnP will be disabled and it will strictly use Essential Matrix.",
     )
 
     args = parser.parse_args()
