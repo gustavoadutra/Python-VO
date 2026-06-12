@@ -25,6 +25,8 @@ class VisualOdometry(object):
         self.ref_idx_to_landmark_id = {}
         self.current_observations = []
 
+        # Matriz para a imagem ja calibrada
+        # Converte os pixels em raios de luz direcionais no espaco 3D
         self.K = np.array([[self.focal[0], 0, self.pp[0]],
                            [0, self.focal[1], self.pp[1]],
                            [0, 0, 1]], dtype=float)
@@ -32,9 +34,11 @@ class VisualOdometry(object):
         self.ba_active = False
         self.enable_pnp_conf = enable_pnp
 
+        # Configurable variables
         self.min_3d_points = 10
+        self.min_keypoints = 10
         self.min_absolute_scale = 0.0001
-        self.min_depth = 0.01  # 10 cm
+        self.min_depth = 0.001  # 10 cm
         self.max_depth = 100.0  # 100 m
 
     def set_ba_active(self, active: bool):
@@ -50,17 +54,18 @@ class VisualOdometry(object):
             self.current_observations.append((lm_id, u_cur, v_cur))
 
     def update(self, image, absolute_scale=1.0):
-        # 1. Extração
+        # Extração dos pontos
         kptdesc = self.detector(image)
-        if kptdesc is None:
+
+        # Verifica se o detector retornou keypoints suficientes
+        if kptdesc is None or len(kptdesc.get("keypoints", [])) < self.min_keypoints:
             self.kptdescs["cur"] = {"keypoints": [], "descriptors": [], "scores": []}
+            self.index += 1
+            return self.cur_R, self.cur_t, None, None
         else:
             self.kptdescs["cur"] = kptdesc
 
-        if kptdesc is None or len(kptdesc.get("keypoints", [])) < 8:
-            self.index += 1
-            return self.cur_R, self.cur_t, None, None
-
+        # Se for o primeiro descritor
         if self.index == 0 or "ref" not in self.kptdescs:
             self.kptdescs["ref"] = self.kptdescs["cur"]
             self.index += 1
@@ -70,7 +75,7 @@ class VisualOdometry(object):
         R_rel = None
 
         try:
-            # Matching
+            # Matching 
             good_matches = self.matcher.match(self.kptdescs)
             matched_dict = self.matcher.get_good_keypoints(self.kptdescs)
 
@@ -148,16 +153,24 @@ class VisualOdometry(object):
             if not use_pnp:
                 if self.enable_pnp_conf:
                     print(f"Frame {self.index}: PnP falhou ou pontos insuficientes. Usando Essential Matrix.")
-
+                # Usa ransac para filtrar os pontos 
+                # prob eh a probabilidade encontrar a matriz perfeita
+                # threshold e a distancia de erro em pixel de onde ele deveria estar
+                # E eh a matriz essencial calculada, mask diz se eh inlier
                 E, mask = cv2.findEssentialMat(
                     ref_pts, cur_pts, cameraMatrix=self.K,
                     method=cv2.RANSAC, prob=0.999, threshold=1.0
                 )
+                # A matriz essencial retorna 4 posicoes possiveis de T e R
+                # teste de Cheirality Check para descobrir qual eh a certa
+                # o vetor de t eh normalizado, logo nao tem escala
                 _, R, t, mask = cv2.recoverPose(E, ref_pts, cur_pts, cameraMatrix=self.K)
 
                 inlier_mask = mask.flatten().astype(bool)
+                print(f"Frame {self.index}: {np.sum(inlier_mask)} inliers")
 
                 if absolute_scale > self.min_absolute_scale:
+                    # Cal
                     R_rel = R.T
                     t_rel = -R.T.dot(absolute_scale * t)
 
@@ -167,17 +180,17 @@ class VisualOdometry(object):
                     self.cur_R = prev_R.dot(R_rel)
                     self.cur_t = prev_t + prev_R.dot(t_rel)
 
-                    new_ref_idx_to_landmark_id = {}
-                    if self.ba_active:
-                        self.current_observations = []
-
-                    P1 = self.K @ np.hstack((np.eye(3), np.zeros((3, 1))))
-                    P2 = self.K @ np.hstack((R, absolute_scale * t))
-
-                    print(f"Frame {self.index}: {np.sum(inlier_mask)} inliers")
 
                     # Triangulação e atualização de landmarks
                     if self.ba_active or self.enable_pnp_conf:
+                        new_ref_idx_to_landmark_id = {}
+                        self.current_observations = []
+                        # Matrizes de projecao
+                        # Descreve como um ponto 3D no mundo eh projetado para virar um pixel
+                        # Cola as matrizes intrinsecas e extrinsecas
+                        P1 = self.K @ np.hstack((np.eye(3), np.zeros((3, 1))))
+                        P2 = self.K @ np.hstack((R, absolute_scale * t))
+                        # So considera inliers no calculo
                         for idx, is_inlier in enumerate(inlier_mask):
                             if not is_inlier:
                                 continue
@@ -192,8 +205,16 @@ class VisualOdometry(object):
                                 lm_id = self.ref_idx_to_landmark_id[q_idx]
                                 self._track_landmark(lm_id, t_idx, u_cur, v_cur, new_ref_idx_to_landmark_id)
                             
+                            # Filtra apenas os pontos válidos usando a máscara booleana
+                            valid_ref_pts = ref_pts[inlier_mask]
+                            valid_cur_pts = cur_pts[inlier_mask]
+
+                            # Triangula TODOS os pontos de uma vez só (muito mais rápido)
+                            pts4d_all = cv2.triangulatePoints(P1, P2, valid_ref_pts.T, valid_cur_pts.T)
+                            pts3d_local_all = pts4d_all[:3, :] / pts4d_all[3, :]
+
                             # Só triangula se o PnP estiver ativado ou BA ligado
-                            elif self.enable_pnp_conf or self.ba_active:
+                            if self.enable_pnp_conf or self.ba_active:
                                 pt4d = cv2.triangulatePoints(
                                     P1, P2,
                                     ref_pts[idx].reshape(2, 1),
