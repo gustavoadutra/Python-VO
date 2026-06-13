@@ -183,67 +183,71 @@ class VisualOdometry(object):
                     self.cur_R = prev_R.dot(R_rel)
                     self.cur_t = prev_t + prev_R.dot(t_rel)
 
-
                     # Triangulação e atualização de landmarks
                     if self.ba_active or self.enable_pnp_conf:
                         new_ref_idx_to_landmark_id = {}
                         self.current_observations = []
+                        
                         # Matrizes de projecao
                         # Descreve como um ponto 3D no mundo eh projetado para virar um pixel
                         # Cola as matrizes intrinsecas e extrinsecas
                         P1 = self.K @ np.hstack((np.eye(3), np.zeros((3, 1))))
                         P2 = self.K @ np.hstack((R, absolute_scale * t))
-                        # So considera inliers no calculo
-                        for idx, is_inlier in enumerate(inlier_mask):
-                            if not is_inlier:
-                                continue
+                        
+                        # --- INÍCIO DA CORREÇÃO: Triangulação Vetorizada ---
+                        
+                        # Pegamos os índices exatos onde a máscara é verdadeira (inliers)
+                        inlier_indices = np.where(inlier_mask)[0]
+                        
+                        if len(inlier_indices) > 0:
+                            # Filtra apenas os pontos válidos para triangulação de uma só vez
+                            valid_ref_pts = ref_pts[inlier_indices]
+                            valid_cur_pts = cur_pts[inlier_indices]
 
-                            match = good_matches[idx][0]
-                            q_idx = match.queryIdx
-                            t_idx = match.trainIdx
-                            u_cur, v_cur = cur_pts[idx]
-
-                            if q_idx in self.ref_idx_to_landmark_id:
-                                # Ponto conhecido
-                                lm_id = self.ref_idx_to_landmark_id[q_idx]
-                                self._track_landmark(lm_id, t_idx, u_cur, v_cur, new_ref_idx_to_landmark_id)
-                            
-                            # Filtra apenas os pontos válidos usando a máscara booleana
-                            valid_ref_pts = ref_pts[inlier_mask]
-                            valid_cur_pts = cur_pts[inlier_mask]
-
-                            # Triangula TODOS os pontos de uma vez só (muito mais rápido)
+                            # Triangula todos os pontos válidos de uma só vez (Fora do laço!)
                             pts4d_all = cv2.triangulatePoints(P1, P2, valid_ref_pts.T, valid_cur_pts.T)
+                            
+                            # Converte de coordenadas homogêneas (4D) para euclidianas (3D) dividindo por W
                             pts3d_local_all = pts4d_all[:3, :] / pts4d_all[3, :]
 
-                            # Só triangula se o PnP estiver ativado ou BA ligado
-                            if self.enable_pnp_conf or self.ba_active:
-                                pt4d = cv2.triangulatePoints(
-                                    P1, P2,
-                                    ref_pts[idx].reshape(2, 1),
-                                    cur_pts[idx].reshape(2, 1)
-                                )
-                                pt3d_local = (pt4d[:3, 0] / pt4d[3, 0]).reshape(3, 1)
+                            # Agora iteramos apenas para checar profundidade e salvar os landmarks
+                            for i, idx in enumerate(inlier_indices):
+                                match = good_matches[idx][0]
+                                q_idx = match.queryIdx
+                                t_idx = match.trainIdx
+                                u_cur, v_cur = cur_pts[idx]
 
-                                # Calculo de profundidade para filtragem do ponto triangulado
-                                # 1 metro ate 100 metros 
-                                if not (self.min_depth < pt3d_local[2, 0] < self.max_depth):
-                                    if pt3d_local[2, 0] <= self.min_depth:
-                                        print(f"[VO WARNING] Profundidade abaixo do limite: {pt3d_local[2, 0]:.4f}. Ignorando.")
-                                    else:
-                                        print(f"[VO WARNING] Profundidade acima do limite: {pt3d_local[2, 0]:.4f}. Ignorando.")
-                                    continue
+                                if q_idx in self.ref_idx_to_landmark_id:
+                                    # Ponto já conhecido, apenas atualiza o tracking
+                                    lm_id = self.ref_idx_to_landmark_id[q_idx]
+                                    self._track_landmark(lm_id, t_idx, u_cur, v_cur, new_ref_idx_to_landmark_id)
+                                else:
+                                    # Ponto novo: pegamos o ponto 3D correspondente do array triangulado
+                                    # i é o índice no array de inliers; idx é o índice original nas features
+                                    pt3d_local = pts3d_local_all[:, i].reshape(3, 1)
 
-                                pt3d_global = prev_R.dot(pt3d_local) + prev_t
-                                descriptor = self.kptdescs["cur"]["descriptors"][t_idx]
-                                lm_id = self.landmark_manager.add_landmark(
-                                    pt3d_global.flatten(), descriptor, self.index, u_cur, v_cur
-                                )
+                                    # Calculo de profundidade para filtragem do ponto triangulado
+                                    depth = pt3d_local[2, 0]
+                                    if not (self.min_depth < depth < self.max_depth):
+                                        if depth <= self.min_depth:
+                                            print(f"[VO WARNING] Profundidade abaixo do limite: {depth:.4f}. Ignorando.")
+                                        else:
+                                            print(f"[VO WARNING] Profundidade acima do limite: {depth:.4f}. Ignorando.")
+                                        continue
 
-                                self._track_landmark(lm_id, t_idx, u_cur, v_cur, new_ref_idx_to_landmark_id)
+                                    # Converte o ponto local recém-criado para as coordenadas globais
+                                    pt3d_global = prev_R.dot(pt3d_local) + prev_t
+                                    descriptor = self.kptdescs["cur"]["descriptors"][t_idx]
+                                    
+                                    # Adiciona no gerenciador de landmarks
+                                    lm_id = self.landmark_manager.add_landmark(
+                                        pt3d_global.flatten(), descriptor, self.index, u_cur, v_cur
+                                    )
+
+                                    # Atualiza o dicionário de rastreio para o próximo frame
+                                    self._track_landmark(lm_id, t_idx, u_cur, v_cur, new_ref_idx_to_landmark_id)
 
                         self.ref_idx_to_landmark_id = new_ref_idx_to_landmark_id
-
             self.kptdescs["ref"] = self.kptdescs["cur"]
 
         except Exception as e:
