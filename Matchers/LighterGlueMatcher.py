@@ -6,6 +6,17 @@ from utils.tools import *
 from Detectors.accelerated_features.modules.lighterglue import LighterGlue
 
 
+class LighterGlueMatch(object):
+    """
+    Classe mock para simular a estrutura de um cv2.DMatch.
+    Permite que a VisualOdometry acesse .queryIdx e .trainIdx de forma transparente.
+    """
+    def __init__(self, queryIdx, trainIdx, distance=0.0):
+        self.queryIdx = queryIdx
+        self.trainIdx = trainIdx
+        self.distance = distance
+
+
 class LighterGlueMatcher(object):
     default_config = {
         "weights": None,
@@ -23,67 +34,76 @@ class LighterGlueMatcher(object):
         logging.info("creating LighterGlue matcher...")
         self.lighterglue = LighterGlue(weights=self.config.get("weights"))
         self.lighterglue.to(self.device)
+        
+        # Armazenamento interno para manter compatibilidade com a chamada dividida da VO
+        self.good = []
+        self.ret_dict = {}
 
-    def __call__(self, data):
-
-        # Prepare data for LighterGlue
+    def match(self, kptdescs):
+        """
+        Executa a correspondência de features usando o LighterGlue e popula as estruturas
+        esperadas pela classe VisualOdometry.
+        """
+        # Prepara os dados no formato que o LighterGlue espera
         data = {
-            'keypoints0': torch.from_numpy(data['ref']['keypoints']).unsqueeze(0).to(self.device).float(),
-            'descriptors0': torch.from_numpy(data['ref']['descriptors']).unsqueeze(0).to(self.device).float(),
-            'image_size0': torch.tensor(data['ref']['image_size']).unsqueeze(0).to(self.device).long(),
-            'keypoints1': torch.from_numpy(data['cur']['keypoints']).unsqueeze(0).to(self.device).float(),
-            'descriptors1': torch.from_numpy(data['cur']['descriptors']).unsqueeze(0).to(self.device).float(),
-            'image_size1': torch.tensor(data['cur']['image_size']).unsqueeze(0).to(self.device).long(),
+            'keypoints0': torch.from_numpy(kptdescs['ref']['keypoints']).unsqueeze(0).to(self.device).float(),
+            'descriptors0': torch.from_numpy(kptdescs['ref']['descriptors']).unsqueeze(0).to(self.device).float(),
+            'image_size0': torch.tensor(kptdescs['ref']['image_size']).unsqueeze(0).to(self.device).long(),
+            'keypoints1': torch.from_numpy(kptdescs['cur']['keypoints']).unsqueeze(0).to(self.device).float(),
+            'descriptors1': torch.from_numpy(kptdescs['cur']['descriptors']).unsqueeze(0).to(self.device).float(),
+            'image_size1': torch.tensor(kptdescs['cur']['image_size']).unsqueeze(0).to(self.device).long(),
         }
 
-        # Run lighterglue
+        # Executa a inferência do matcher baseado em redes neurais
         logging.debug("matching keypoints with LighterGlue...")
         out = self.lighterglue(data, min_conf=self.config.get("min_conf", 0.1))
 
-        # Extract matches indices
+        # Extrai os índices dos matches válidos
         idxs = out["matches"][0]
 
-        # Convert to numpy keypoint arrays
+        # Converte os keypoints originais para numpy para fatiamento
         kp_ref = data["keypoints0"][0].cpu().numpy()
         kp_cur = data["keypoints1"][0].cpu().numpy()
 
         if idxs.numel() == 0:
-            return {"ref_keypoints": np.zeros((0, 2)), "cur_keypoints": np.zeros((0, 2)), "match_score": np.array([])}
+            self.good = []
+            self.ret_dict = {"ref_keypoints": np.zeros((0, 2)), "cur_keypoints": np.zeros((0, 2)), "match_score": np.array([])}
+            return self.good
 
         idxs_np = idxs.cpu().numpy()
         mkpts0 = kp_ref[idxs_np[:, 0]]
         mkpts1 = kp_cur[idxs_np[:, 1]]
 
-        # Extract confidence scores (scores are per match, not per keypoint)
+        # Extrai os scores de confiança (métrica nativa do modelo)
         scores = out.get("scores", None)
         if scores is not None:
             match_scores = scores[0].cpu().numpy()
         else:
             match_scores = np.ones(len(idxs_np))
 
-        return {"ref_keypoints": mkpts0, "cur_keypoints": mkpts1, "match_score": match_scores}
+        # Monta o dicionário de retorno idêntico ao do FrameByFrameMatcher
+        self.ret_dict = {
+            "ref_keypoints": mkpts0,
+            "cur_keypoints": mkpts1,
+            "match_score": match_scores
+        }
 
+        # Constrói a lista 'good' no formato de lista de listas contendo os índices originais mapeados
+        self.good = []
+        for i, (idx_ref, idx_cur) in enumerate(idxs_np):
+            score = match_scores[i]
+            # Encapsula no LighterGlueMatch simulando o cv2.DMatch
+            # A distância pode ser interpretada inversamente ao score (1.0 - conf)
+            match_obj = LighterGlueMatch(queryIdx=int(idx_ref), trainIdx=int(idx_cur), distance=float(1.0 - score))
+            self.good.append([match_obj])
 
-if __name__ == "__main__":
-    from DataLoader.SequenceImageLoader import SequenceImageLoader
-    from Detectors.XfeatDetector import XfeatDetector
+        return self.good
 
-    loader = SequenceImageLoader()
-    detector = XfeatDetector({"cuda": 0})
-    matcher = LighterGlueMatcher({"cuda": 0})
+    def get_good_keypoints(self, kptdescs=None):
+        """Retorna o dicionário processado na última chamada do método match."""
+        return self.ret_dict
 
-    kptdescs = {}
-    imgs = {}
-    for i, img in enumerate(loader):
-        imgs["cur"] = img
-        kptdescs["cur"] = detector(img)
-        if i >= 1:
-            matches = matcher(kptdescs)
-            img = plot_matches(imgs['ref'], imgs['cur'], matches['ref_keypoints'][0:200], matches['cur_keypoints'][0:200], matches['match_score'][0:200], layout='lr')
-            import cv2
-
-            cv2.imshow("track", img)
-            if cv2.waitKey() == 27:
-                break
-
-        kptdescs["ref"], imgs["ref"] = kptdescs["cur"], imgs["cur"]
+    def __call__(self, data):
+        """Mantém compatibilidade com chamadas diretas no formato antigo."""
+        self.match(data)
+        return self.get_good_keypoints()

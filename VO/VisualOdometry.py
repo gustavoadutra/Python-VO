@@ -34,11 +34,13 @@ class VisualOdometry(object):
         self.ba_active = False
         self.enable_pnp_conf = enable_pnp
 
+        self.num_ref_keypoints = 0
+
         # Configurable variables
         self.min_3d_points = 10
-        self.min_keypoints = 10
-        self.min_absolute_scale = 0.0001
-        self.min_depth = 0.001  # 10 cm
+        self.min_keypoints = 15
+        self.min_absolute_scale = 0.0001 # m
+        self.min_depth = 0.00001  # 10 cm
         self.max_depth = 100.0  # 100 m
 
         # Min 3D points to PNP
@@ -84,6 +86,12 @@ class VisualOdometry(object):
 
             ref_pts = matched_dict["ref_keypoints"]
             cur_pts = matched_dict["cur_keypoints"]
+
+            # DEPOIS — só atualiza se for um keyframe
+            # robô parado ou pouco movimento: mantém o mesmo keyframe como ref
+            # o PnP ainda funciona normalmente pois os landmarks já existem
+            is_keyframe = self._should_create_keyframe(ref_pts, cur_pts)
+
 
             object_points_3d = []
             image_points_2d = []
@@ -248,11 +256,29 @@ class VisualOdometry(object):
                                     self._track_landmark(lm_id, t_idx, u_cur, v_cur, new_ref_idx_to_landmark_id)
 
                         self.ref_idx_to_landmark_id = new_ref_idx_to_landmark_id
-            self.kptdescs["ref"] = self.kptdescs["cur"]
+
+                    if is_keyframe:
+                        # Transfere landmarks visíveis no cur para o novo mapa de referência
+                        new_ref_idx = {}
+                        for idx in range(len(ref_pts)):
+                            match = good_matches[idx][0]
+                            q_idx = match.queryIdx
+                            t_idx = match.trainIdx  # índice no cur, que vira a nova ref
+
+                            if q_idx in self.ref_idx_to_landmark_id:
+                                lm_id = self.ref_idx_to_landmark_id[q_idx]
+                                new_ref_idx[t_idx] = lm_id  # remapeia para índices do novo keyframe
+
+                        self.kptdescs["ref"] = self.kptdescs["cur"]
+                        self.num_ref_keypoints = len(self.kptdescs["cur"]["keypoints"])
+                        self.ref_idx_to_landmark_id = new_ref_idx
+                        print(f"Frame {self.index}: novo keyframe criado. Landmarks transferidos: {len(new_ref_idx)}")
+
 
         except Exception as e:
             print(f"Frame {self.index} Error: {e}")
             self.kptdescs["ref"] = self.kptdescs["cur"]
+            self.num_ref_keypoints = len(self.kptdescs["cur"]["keypoints"])
             self.ref_idx_to_landmark_id = {}
 
         self.index += 1
@@ -270,6 +296,22 @@ class VisualOdometry(object):
                 landmark_initials[lm_id] = (float(x), float(y), float(z))
 
         return observations, landmark_initials
+    
+    def _should_create_keyframe(self, ref_pts, cur_pts):
+        if len(ref_pts) == 0 or len(cur_pts) == 0:
+            return False
+        
+        # Paralaxe média entre os pontos matchados
+        flow = cur_pts - ref_pts
+        mean_parallax = np.mean(np.linalg.norm(flow, axis=1))
+        
+        # Taxa de rastreamento (quantos pontos do ref ainda aparecem no cur)
+        tracking_rate = len(cur_pts) / max(self.num_ref_keypoints, 1)
+        
+        parallax_ok  = mean_parallax > self.min_parallax
+        tracking_low = tracking_rate < self.min_track_rate 
+        
+        return parallax_ok or tracking_low
 
 
 class AbsoluteScaleComputer(object):
