@@ -68,6 +68,7 @@ class VisualOdometry(object):
 
         # Verifica se o detector retornou keypoints suficientes
         if kptdesc is None or len(kptdesc.get("keypoints", [])) < self.min_keypoints:
+            print(f"[VO WARNING] Frame {self.index} com {len(kptdesc.get("keypoints", []))} keypoints.")
             self.kptdescs["cur"] = {"keypoints": [], "descriptors": [], "scores": []}
             self.index += 1
             return self.cur_R, self.cur_t, None, None
@@ -167,7 +168,7 @@ class VisualOdometry(object):
 
             if not use_pnp:
                 if self.enable_pnp_conf:
-                    print(f"Frame {self.index}: PnP falhou ou pontos insuficientes. Usando Essential Matrix.")
+                    print(f"[VO WARNING] Frame {self.index}: PnP falhou ou pontos insuficientes. Usando Essential Matrix.")
                 # Usa ransac para filtrar os pontos 
                 # prob eh a probabilidade encontrar a matriz perfeita
                 # threshold e a distancia de erro em pixel de onde ele deveria estar
