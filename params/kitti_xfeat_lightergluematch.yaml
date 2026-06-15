@@ -4,6 +4,8 @@ dataset:
   #root_path: test_imgs
   sequence: '00'
   start: 0
+  scale_factor: 0.75
+
 
 detector:
   name: XfeatDetector
