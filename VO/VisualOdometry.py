@@ -251,25 +251,14 @@ class VisualOdometry(object):
                                     # Atualiza o dicionário de rastreio para o próximo frame
                                     self._track_landmark(lm_id, t_idx, u_cur, v_cur, new_ref_idx_to_landmark_id)
 
-                        self.ref_idx_to_landmark_id = new_ref_idx_to_landmark_id
-
-                    if is_keyframe:
-                        # Transfere landmarks visíveis no cur para o novo mapa de referência
-                        new_ref_idx = {}
-                        for idx in range(len(ref_pts)):
-                            match = good_matches[idx][0]
-                            q_idx = match.queryIdx
-                            t_idx = match.trainIdx  # índice no cur, que vira a nova ref
-
-                            if q_idx in self.ref_idx_to_landmark_id:
-                                lm_id = self.ref_idx_to_landmark_id[q_idx]
-                                new_ref_idx[t_idx] = lm_id  # remapeia para índices do novo keyframe
-                        self.kptdescs["ref"] = self.kptdescs["cur"]
-                        self.num_ref_keypoints = len(self.kptdescs["cur"]["keypoints"])
-                        self.ref_idx_to_landmark_id = new_ref_idx
-                        print(f"Frame {self.index}: novo keyframe criado. Landmarks transferidos: {len(new_ref_idx)}")
-                    elif not self.enable_pnp_conf:
-                        self.kptdescs["ref"] = self.kptdescs["cur"]
+            if is_keyframe:
+                # Transfere landmarks visíveis no cur para o novo mapa de referência
+                self.kptdescs["ref"] = self.kptdescs["cur"]
+                self.num_ref_keypoints = len(self.kptdescs["cur"]["keypoints"])
+                self.ref_idx_to_landmark_id = new_ref_idx_to_landmark_id
+                print(f"Frame {self.index}: novo keyframe criado. Landmarks transferidos: {len(self.ref_idx_to_landmark_id)}")
+            elif not self.enable_pnp_conf:
+                self.kptdescs["ref"] = self.kptdescs["cur"]
 
         except Exception as e:
             print(f"Frame {self.index} Error: {e}")
