@@ -45,6 +45,9 @@ class VisualOdometry(object):
 
         # Min 3D points to PNP
         self.min_3d_pnp_points = 40
+        self.min_parallax = 8
+        self.min_track_rate = 8
+        self.min_inliers = 0
 
     def set_ba_active(self, active: bool):
         self.ba_active = active
@@ -61,6 +64,7 @@ class VisualOdometry(object):
     def update(self, image, absolute_scale=1.0):
         # Extração dos pontos
         kptdesc = self.detector(image)
+        is_keyframe = False
 
         # Verifica se o detector retornou keypoints suficientes
         if kptdesc is None or len(kptdesc.get("keypoints", [])) < self.min_keypoints:
@@ -90,8 +94,8 @@ class VisualOdometry(object):
             # DEPOIS — só atualiza se for um keyframe
             # robô parado ou pouco movimento: mantém o mesmo keyframe como ref
             # o PnP ainda funciona normalmente pois os landmarks já existem
-            is_keyframe = self._should_create_keyframe(ref_pts, cur_pts)
-
+            if self.enable_pnp_conf:
+                is_keyframe = self._should_create_keyframe(ref_pts, cur_pts)
 
             object_points_3d = []
             image_points_2d = []
@@ -201,13 +205,12 @@ class VisualOdometry(object):
                         # Cola as matrizes intrinsecas e extrinsecas
                         P1 = self.K @ np.hstack((np.eye(3), np.zeros((3, 1))))
                         P2 = self.K @ np.hstack((R, absolute_scale * t))
-                        
-                        # --- INÍCIO DA CORREÇÃO: Triangulação Vetorizada ---
-                        
+                                                
                         # Pegamos os índices exatos onde a máscara é verdadeira (inliers)
                         inlier_indices = np.where(inlier_mask)[0]
                         
-                        if len(inlier_indices) > 0:
+                        if len(inlier_indices) > self.min_inliers:
+                            print()
                             # Filtra apenas os pontos válidos para triangulação de uma só vez
                             valid_ref_pts = ref_pts[inlier_indices]
                             valid_cur_pts = cur_pts[inlier_indices]
@@ -268,12 +271,12 @@ class VisualOdometry(object):
                             if q_idx in self.ref_idx_to_landmark_id:
                                 lm_id = self.ref_idx_to_landmark_id[q_idx]
                                 new_ref_idx[t_idx] = lm_id  # remapeia para índices do novo keyframe
-
                         self.kptdescs["ref"] = self.kptdescs["cur"]
                         self.num_ref_keypoints = len(self.kptdescs["cur"]["keypoints"])
                         self.ref_idx_to_landmark_id = new_ref_idx
                         print(f"Frame {self.index}: novo keyframe criado. Landmarks transferidos: {len(new_ref_idx)}")
-
+                    elif not self.enable_pnp_conf:
+                        self.kptdescs["ref"] = self.kptdescs["cur"]
 
         except Exception as e:
             print(f"Frame {self.index} Error: {e}")
