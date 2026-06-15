@@ -18,7 +18,7 @@ class TrajPlotter(object):
         self.is_robot = is_robot
         self.w, self.h = width, height
         self.offset_x, self.offset_y = self.w // 2, self.h // 2
-        self.scale = 200 if is_robot else 0.25
+        self.scale = 200 if is_robot else 0.75
         self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
         
         # Estrutura simplificada usando dicionários

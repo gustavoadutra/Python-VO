@@ -32,7 +32,7 @@ class VisualOdometry(object):
                            [0, 0, 1]], dtype=float)
 
         self.ba_active = False
-        self.enable_pnp_conf = enable_pnp
+        self.enable_pnp_conf = enable_pnp # controle de "novidades"
 
         self.num_ref_keypoints = 0
 
