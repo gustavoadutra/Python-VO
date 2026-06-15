@@ -26,13 +26,12 @@ class VisualOdometry(object):
         self.current_observations = []
 
         # Matriz para a imagem ja calibrada
-        # Converte os pixels em raios de luz direcionais no espaco 3D
         self.K = np.array([[self.focal[0], 0, self.pp[0]],
                            [0, self.focal[1], self.pp[1]],
                            [0, 0, 1]], dtype=float)
 
         self.ba_active = False
-        self.enable_pnp_conf = enable_pnp # controle de "novidades"
+        self.enable_pnp_conf = enable_pnp 
 
         self.num_ref_keypoints = 0
 
@@ -68,7 +67,7 @@ class VisualOdometry(object):
 
         # Verifica se o detector retornou keypoints suficientes
         if kptdesc is None or len(kptdesc.get("keypoints", [])) < self.min_keypoints:
-            print(f"[VO WARNING] Frame {self.index} com {len(kptdesc.get("keypoints", []))} keypoints.")
+            print(f"[VO WARNING] Frame {self.index} com {len(kptdesc.get('keypoints', []))} keypoints.")
             self.kptdescs["cur"] = {"keypoints": [], "descriptors": [], "scores": []}
             self.index += 1
             return self.cur_R, self.cur_t, None, None
@@ -91,7 +90,6 @@ class VisualOdometry(object):
 
             ref_pts = matched_dict["ref_keypoints"]
             cur_pts = matched_dict["cur_keypoints"]
-
             # DEPOIS — só atualiza se for um keyframe
             # robô parado ou pouco movimento: mantém o mesmo keyframe como ref
             # o PnP ainda funciona normalmente pois os landmarks já existem
@@ -102,7 +100,6 @@ class VisualOdometry(object):
             image_points_2d = []
             inlier_matches_idx = []
 
-            # Só percorre e cria arrays 3D se o PnP estiver ativado
             if self.enable_pnp_conf:
                 for idx in range(len(ref_pts)):
                     match = good_matches[idx][0]
@@ -120,6 +117,11 @@ class VisualOdometry(object):
                 image_points_2d = np.array(image_points_2d, dtype=np.float32)
 
             use_pnp = False
+            
+            # Novo dicionário temporário para rastrear as correspondências do frame ATUAL
+            new_ref_idx_to_landmark_id = {}
+            if self.ba_active:
+                self.current_observations = []
 
             # =========================================================
             # CAMINHO 1: PnP — usa landmarks 3D já triangulados
@@ -134,7 +136,7 @@ class VisualOdometry(object):
                     reprojectionError=2.0
                 )
 
-                if success and inliers is not None and len(inliers) >= 10:
+                if success and inliers is not None and len(inliers) >= self.min_inliers:
                     use_pnp = True
                     print(f"Frame {self.index}: PnP inliers = {len(inliers)} / {len(object_points_3d)}")
 
@@ -148,10 +150,6 @@ class VisualOdometry(object):
                     R_rel = prev_R.T.dot(self.cur_R)
                     t_rel = prev_R.T.dot(self.cur_t - prev_t)
 
-                    new_ref_idx_to_landmark_id = {}
-                    if self.ba_active:
-                        self.current_observations = []
-
                     for i in inliers.flatten():
                         idx_original = inlier_matches_idx[i]
                         match = good_matches[idx_original][0]
@@ -160,12 +158,10 @@ class VisualOdometry(object):
                         
                         self._track_landmark(lm_id, match.trainIdx, u_cur, v_cur, new_ref_idx_to_landmark_id)
 
-                    self.ref_idx_to_landmark_id = new_ref_idx_to_landmark_id
 
             # =========================================================
             # CAMINHO 2: Essential Matrix — fallback
             # =========================================================
-
             if not use_pnp:
                 if self.enable_pnp_conf:
                     print(f"[VO WARNING] Frame {self.index}: PnP falhou ou pontos insuficientes. Usando Essential Matrix.")
@@ -173,6 +169,7 @@ class VisualOdometry(object):
                 # prob eh a probabilidade encontrar a matriz perfeita
                 # threshold e a distancia de erro em pixel de onde ele deveria estar
                 # E eh a matriz essencial calculada, mask diz se eh inlier
+
                 E, mask = cv2.findEssentialMat(
                     ref_pts, cur_pts, cameraMatrix=self.K,
                     method=cv2.RANSAC, prob=0.999, threshold=1.0
@@ -186,7 +183,6 @@ class VisualOdometry(object):
                 print(f"Frame {self.index}: {np.sum(inlier_mask)} inliers")
 
                 if absolute_scale > self.min_absolute_scale:
-                    # Cal
                     R_rel = R.T
                     t_rel = -R.T.dot(absolute_scale * t)
 
@@ -195,12 +191,8 @@ class VisualOdometry(object):
 
                     self.cur_R = prev_R.dot(R_rel)
                     self.cur_t = prev_t + prev_R.dot(t_rel)
-
                     # Triangulação e atualização de landmarks
                     if self.ba_active or self.enable_pnp_conf:
-                        new_ref_idx_to_landmark_id = {}
-                        self.current_observations = []
-                        
                         # Matrizes de projecao
                         # Descreve como um ponto 3D no mundo eh projetado para virar um pixel
                         # Cola as matrizes intrinsecas e extrinsecas
@@ -316,7 +308,6 @@ class VisualOdometry(object):
         tracking_low = tracking_rate < self.min_track_rate 
         
         return parallax_ok or tracking_low
-
 
 class AbsoluteScaleComputer(object):
     def __init__(self):
