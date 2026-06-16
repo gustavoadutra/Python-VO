@@ -37,15 +37,14 @@ class VisualOdometry(object):
 
         # Configurable variables
         self.min_3d_points = 10
-        self.min_keypoints = 15
-        self.min_absolute_scale = 0.0001 # m
+        self.min_keypoints = 20
+        self.min_absolute_scale = 0.1 # m
         self.min_depth = 0.00001  # 10 cm
         self.max_depth = 100.0  # 100 m
 
         # Min 3D points to PNP
-        self.min_3d_pnp_points = 40
-        self.min_parallax = 8
-        self.min_track_rate = 8
+        self.min_parallax = 10
+        self.min_track_rate = 10
         self.min_inliers = 0
 
     def set_ba_active(self, active: bool):
@@ -135,11 +134,9 @@ class VisualOdometry(object):
                     flags=cv2.SOLVEPNP_EPNP,
                     reprojectionError=2.0
                 )
-
+                print(f"Frame {self.index}: PnP inliers = {len(inliers)} / {len(object_points_3d)}")
                 if success and inliers is not None and len(inliers) >= self.min_inliers:
                     use_pnp = True
-                    print(f"Frame {self.index}: PnP inliers = {len(inliers)} / {len(object_points_3d)}")
-
                     R_cam2world, _ = cv2.Rodrigues(rvec)
                     prev_R = self.cur_R.copy()
                     prev_t = self.cur_t.copy()
@@ -157,6 +154,8 @@ class VisualOdometry(object):
                         lm_id = self.ref_idx_to_landmark_id[match.queryIdx]
                         
                         self._track_landmark(lm_id, match.trainIdx, u_cur, v_cur, new_ref_idx_to_landmark_id)
+                    
+                    print(f"Frame {self.index} landmark")
 
 
             # =========================================================
