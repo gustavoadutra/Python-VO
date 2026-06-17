@@ -59,7 +59,16 @@ def run(args):
         print(f"[DEBUG] WO initialized. CSV loaded: {wo.df is not None}")
 
     fname = args.config.split("/")[-1].split(".")[0]
-    log_fopen = open("results/" + fname + ".txt", mode="a")
+    
+    # Define o sufixo dinâmico baseado nos argumentos passados
+    suffix = ""
+    if args.ba:
+        suffix += "_ba"
+    if args.no_pnp:
+        suffix += "_nopnp"
+
+    log_filename = f"results/{fname}{suffix}.txt"
+    log_fopen = open(log_filename, mode="a")
 
     # Initialize RTSP Handler
     rtsp_handler = None
@@ -164,14 +173,28 @@ def run(args):
         if cv2.waitKey(10) == 27:
             break
 
-    output_image = f"results/{fname}{'_ba' if args.ba else ''}.png"
+    # --- NOVO: Usa a variável de sufixo para nomear a imagem também ---
+    output_image = f"results/{fname}{suffix}.png"
     cv2.imwrite(output_image, img2)
     log_fopen.close()
 
     detector_name = config["detector"].get("type", config["detector"].get("name", "unknown"))
     matcher_name = config["matcher"].get("type", config["matcher"].get("name", "unknown"))
-    traj_plotter.save_errors_to_csv(config, detector_name=detector_name, matcher_name=matcher_name)
-
+    
+    # Passando a variável `suffix` para garantir o mesmo padrão de nomenclatura
+    traj_plotter.save_errors_to_csv(
+        config, 
+        detector_name=detector_name, 
+        matcher_name=matcher_name, 
+        extra_suffix=suffix
+    )
+    
+    traj_plotter.save_positions_to_csv(
+        config, 
+        detector_name=detector_name, 
+        matcher_name=matcher_name, 
+        extra_suffix=suffix
+    )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="python_vo")

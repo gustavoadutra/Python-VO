@@ -175,7 +175,8 @@ class GTSAMBundleAdjuster(object):
                     'initial_3d': landmark_initials[lm_id],
                     'obs': [(pose_symbol, u, v)]
                 }
-        # 3. Update iSAM2 and calculate the estimate (com proteção contra anomalias)
+        # 3. Update iSAM2 and calculate the estimate
+        optimization_successful = False        
         try:
             # O GTSAM só será atualizado se houver novos fatores além do prior da câmera
             if new_factors.size() > 0:
@@ -184,19 +185,32 @@ class GTSAMBundleAdjuster(object):
                 
                 optimized_pose = result.atPose3(pose_symbol)
                 self.last_pose = optimized_pose
+                optimization_successful = True
         except Exception as e:
             print(f"[GTSAM INTERNAL ERROR] Falha na otimização da keyframe {self.current_key}: {e}")
         
         self.current_key += 1
 
         # Retorna a pose otimizada se disponível, caso contrário devolve a odometria bruta
-        if self.last_pose is not None:
+        if optimization_successful and self.last_pose is not None:
             return self.last_pose.rotation().matrix(), np.array(
                 self.last_pose.translation()
             ).reshape(3, 1)
         else:
             print(f"[BA WARNING] Otimização falhou para keyframe {self.current_key - 1}. Retornando odometria bruta.")
-            return R_vo, t_vo
-
+            if self.last_pose is not None and relative_rotation is not None and relative_translation is not None:
+                # Solução Robusta: Pega a ÚLTIMA pose boa do BA e integra a odometria relativa atual
+                rel_pose = self._pose3_from_rt(relative_rotation, relative_translation)
+                propagated_pose = self.last_pose.compose(rel_pose) # Multiplicação de matrizes de transformação
+                
+                # Atualiza o last_pose para que o próximo frame parta daqui caso o erro persista
+                self.last_pose = propagated_pose 
+                
+                return propagated_pose.rotation().matrix(), np.array(propagated_pose.translation()).reshape(3, 1)
+            else:
+                # Pior caso (falhou no frame 0 ou não temos odometria relativa): 
+                # Retorna a bruta pois é a única coisa que temos.
+                print(f"[BA WARNING] Nenhuma odometria {self.current_key - 1}. Retornando odometria bruta.")
+                return R_vo, t_vo
     def get_last_pose(self):
         return self.last_pose

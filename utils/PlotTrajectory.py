@@ -150,19 +150,24 @@ class TrajPlotter(object):
             metrics[key] = {'ATE': ate, 'RPE': rpe}
             
         return metrics
-    def save_errors_to_csv(self, config, detector_name="", matcher_name="", output_folder="data"):
+    
+    def save_errors_to_csv(self, config, detector_name="", matcher_name="", extra_suffix="", output_folder="data"):
         sequence = config['dataset'].get('sequence', 'unknown')
         seq_folder = os.path.join(output_folder, sequence)
         os.makedirs(seq_folder, exist_ok=True)
         
-        suffix = f"{detector_name}_{matcher_name}" if detector_name and matcher_name else ""
-        base_name = f"{suffix}_errors.csv" if suffix else "errors.csv"
+        # Junta o nome do detector e matcher
+        name_prefix = f"{detector_name}_{matcher_name}" if detector_name and matcher_name else ""
+        
+        # Adiciona o sufixo extra (ex: _ba_nopnp)
+        if name_prefix:
+            base_name = f"{name_prefix}{extra_suffix}_errors.csv"
+        else:
+            base_name = f"errors{extra_suffix}.csv"
+            
         csv_filename = os.path.join(seq_folder, base_name)
         
-        # Encontra o limite de frames processados
         max_len = max([len(v) for v in self.errors.values()] + [0])
-        
-        # Calcula as métricas globais antes de salvar
         metrics = self.calculate_metrics()
         
         with open(csv_filename, mode='w', newline='') as csv_file:
@@ -170,7 +175,6 @@ class TrajPlotter(object):
                 csv_file.write(f"# Detector: {detector_name}\n")
                 csv_file.write(f"# Matcher: {matcher_name}\n")
             
-            # Adiciona os resultados finais do ATE e RPE no cabeçalho
             for key, res in metrics.items():
                 csv_file.write(f"# {key.upper()} - ATE: {res['ATE']:.4f} | RPE: {res['RPE']:.4f}\n")
             
@@ -190,6 +194,48 @@ class TrajPlotter(object):
         for key, res in metrics.items():
             print(f"[INFO] {key.upper()} Final Metrics -> ATE: {res['ATE']:.4f}m, RPE: {res['RPE']:.4f}m")
 
+    def save_positions_to_csv(self, config, detector_name="", matcher_name="", extra_suffix="", output_folder="data"):
+        sequence = config['dataset'].get('sequence', 'unknown')
+        seq_folder = os.path.join(output_folder, sequence)
+        os.makedirs(seq_folder, exist_ok=True)
+        
+        # Junta o nome do detector e matcher
+        name_prefix = f"{detector_name}_{matcher_name}" if detector_name and matcher_name else ""
+        
+        # Adiciona o sufixo extra (ex: _ba_nopnp)
+        if name_prefix:
+            base_name = f"{name_prefix}{extra_suffix}_positions.csv"
+        else:
+            base_name = f"positions{extra_suffix}.csv"
+            
+        csv_filename = os.path.join(seq_folder, base_name)
+        
+        max_len = max([len(v) for v in self.positions.values()] + [0])
+        
+        with open(csv_filename, mode='w', newline='') as csv_file:
+            if detector_name or matcher_name:
+                csv_file.write(f"# Detector: {detector_name}\n")
+                csv_file.write(f"# Matcher: {matcher_name}\n")
+            
+            fieldnames = ['Frame', 'GT_X', 'GT_Z', 'VO_X', 'VO_Z', 'WO_X', 'WO_Z', 'BA_X', 'BA_Z']
+            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for i in range(max_len):
+                row_data = {'Frame': i}
+                for key in ['gt', 'vo', 'wo', 'ba']:
+                    prefix = key.upper()
+                    if i < len(self.positions[key]):
+                        row_data[f'{prefix}_X'] = self.positions[key][i][0]
+                        row_data[f'{prefix}_Z'] = self.positions[key][i][1]
+                    else:
+                        row_data[f'{prefix}_X'] = ''
+                        row_data[f'{prefix}_Z'] = ''
+                
+                writer.writerow(row_data)
+        
+        print(f"[INFO] Positions saved to {csv_filename}")
+        
     def align_umeyama(self, model, data, with_scale=True):
         """
         Alinha a trajetória estimada (model) à trajetória real (data) 

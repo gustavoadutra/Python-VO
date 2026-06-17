@@ -203,7 +203,6 @@ class VisualOdometry(object):
                         inlier_indices = np.where(inlier_mask)[0]
                         
                         if len(inlier_indices) > self.min_inliers:
-                            print()
                             # Filtra apenas os pontos válidos para triangulação de uma só vez
                             valid_ref_pts = ref_pts[inlier_indices]
                             valid_cur_pts = cur_pts[inlier_indices]
