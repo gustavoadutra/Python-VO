@@ -29,18 +29,21 @@ def run(args):
     loader = create_dataloader(config["dataset"])
     detector = create_detector(config["detector"])
     matcher = create_matcher(config["matcher"])
+    pnp_config = config['pnp']
 
-    vo = VisualOdometry(detector, matcher, loader.cam, enable_pnp=not args.no_pnp)
+    vo = VisualOdometry(
+        detector,
+        matcher,
+        loader.cam,
+        enable_pnp=not args.no_pnp, 
+        config=pnp_config)
 
     # Initialize bundle adjustment if requested and propagate the flag to VO
     ba_obj = None
     if args.ba:
         ba_config = config.get("ba", {})
-        ba_config["fx"] = loader.cam.fx
-        ba_config["fy"] = loader.cam.fy
-        ba_config["cx"] = loader.cam.cx
-        ba_config["cy"] = loader.cam.cy
-        ba_obj = GTSAMBundleAdjuster(ba_config)
+        print(ba_config)
+        ba_obj = GTSAMBundleAdjuster(loader.cam, ba_config)
         # Avisa ao VO que deve manter observações e chamar add_observation
         vo.set_ba_active(True)
 

@@ -7,13 +7,13 @@ class GTSAMBundleAdjuster(object):
     Optimizes both camera poses and 3D landmark positions without using artificial priors.
     """
 
-    def __init__(self, config=None):
+    def __init__(self, cam, config=None):
         if config is None:
             config = {}
         # Standard deviation in pixels for reprojection error
         config.setdefault('pixel_noise', 1.5)
         # Relinearization parameters for iSAM2, se pequeno o isam2 atualiza mais frequentemente, se grande ele é mais conservador
-        config.setdefault('relinearize_threshold', 0.8)
+        config.setdefault('relinearize_threshold', 0.4)
         config.setdefault('relinearize_skip', 1)
         # Confiança inicial para o prior absoluto da pose inicial 
         config.setdefault('noise_prior_sigmas', [0.05, 0.05, 0.05, 0.1, 0.1, 0.1])  # [Roll, Pitch, Yaw, X, Y, Z]
@@ -22,7 +22,7 @@ class GTSAMBundleAdjuster(object):
         # datasets com muita distancia precisam de distancias maiores para trabalhar
         config.setdefault('noise_landmark_prior_sigma', 100)
         # Parâmetros para a lógica de delayed initialization
-        config.setdefault('min_distance_threshold', 8)  # Distância mínima para considerar um ponto maduro em metros
+        config.setdefault('min_distance_threshold', 5)  # Distância mínima para considerar um ponto maduro em metros
         config.setdefault('min_observations_threshold', 10)  # Número mínimo de observações para um ponto ser considerado maduro
         
         self.min_distance_threshold = config['min_distance_threshold']
@@ -37,11 +37,7 @@ class GTSAMBundleAdjuster(object):
         self.isam2 = gtsam.ISAM2(parameters)
 
         # 2. Camera Calibration
-        fx = float(config["fx"])
-        fy = float(config["fy"])
-        cx = float(config["cx"])
-        cy = float(config["cy"])
-        self.calibration = gtsam.Cal3_S2(fx, fy, 0.0, cx, cy)
+        self.calibration = gtsam.Cal3_S2(cam.fx, cam.fy, 0.0, cam.cx, cam.cy)
 
         # 3. Tuned Noise Models
         # [Roll, Pitch, Yaw, X, Y, Z] - Notice translation (XYZ) has higher uncertainty than rotation

@@ -20,3 +20,31 @@ matcher:
     kdTrees: 5
     searchChecks: 50
   distance_ratio: 0.75
+
+# Configurações de PnP
+pnp:
+  min_3d_points: 10
+  min_parallax: 10
+  min_track_rate: 10
+  min_inliers: 0
+
+  min_depth: 0.00001
+  max_depth: 100.0
+  min_absolute_scale: 0.0001
+
+  min_keypoints: 20
+  min_distance_threshold: 5
+  min_observations_threshold: 3
+
+# Configurações de Bundle Adjustment e iSAM2
+ba:
+  pixel_noise: 1.5
+  relinearize_threshold: 0.4
+  relinearize_skip: 1
+  # [Roll, Pitch, Yaw, X, Y, Z]
+  noise_prior_sigmas: [0.05, 0.05, 0.05, 0.1, 0.1, 0.1]
+  noise_odom_sigmas: [0.08, 0.08, 0.08, 0.15, 0.15, 0.15]
+  noise_landmark_prior_sigma: 100.0
+  # Lógica de inicialização de landmarks
+  min_distance_threshold: 5
+  min_observations_threshold: 10

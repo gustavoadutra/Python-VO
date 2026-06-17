@@ -7,13 +7,14 @@ class VisualOdometry(object):
     A robust frame-by-frame monocular visual odometry.
     Handles frames with no keypoints or matching failures gracefully.
     """
-    def __init__(self, detector, matcher, cam, enable_pnp=True):
+    def __init__(self, detector, matcher, cam, enable_pnp=True, config=None):
+        if config is None:
+            config = {}
+
         self.detector = detector
         self.matcher = matcher
         self.focal = (cam.fx, cam.fy)
         self.pp = (cam.cx, cam.cy)
-        self.dist_coeffs = cam.dist_coeffs if hasattr(cam, 'dist_coeffs') else None
-        print(f"Camera Intrinsics: fx={self.focal[0]}, fy={self.focal[1]}, cx={self.pp[0]}, cy={self.pp[1]}")
 
         self.index = 0
         self.kptdescs = {}
@@ -32,20 +33,23 @@ class VisualOdometry(object):
 
         self.ba_active = False
         self.enable_pnp_conf = enable_pnp 
-
-        self.num_ref_keypoints = 0
-
-        # Configurable variables
-        self.min_3d_points = 10
-        self.min_keypoints = 20
-        self.min_absolute_scale = 0.1 # m
-        self.min_depth = 0.00001  # 10 cm
-        self.max_depth = 100.0  # 100 m
-
-        # Min 3D points to PNP
-        self.min_parallax = 10
-        self.min_track_rate = 10
-        self.min_inliers = 0
+        
+        # minimo de keypoints retornados pelo descritor
+        self.min_keypoints = config.get('min_keypoints', 20)
+        self.num_ref_keypoints = config.get("min_ref_keypoints", 0)
+        # minimo de pontos 3d para fazer triangulacao
+        self.min_3d_points = config.get('min_3d_points', 10)
+        # minima escala a odometria retornar t e R
+        self.min_absolute_scale = config.get('min_absolute_scale', 0.0001)
+        # minima e maxima profundidade calculado pela triangulacao
+        self.min_depth = config.get('min_depth', 0.00001)
+        self.max_depth = config.get('max_depth', 100.0)
+        # minimo de paralax para criar novo frame em pixels
+        self.min_parallax = config.get('min_parallax', 10)
+        # quantos pontos do ref ainda aparecem no cur
+        self.min_track_rate = config.get('min_track_rate', 10)
+        # minimo geral de inliers
+        self.min_inliers = config.get('min_inliers', 0)
 
     def set_ba_active(self, active: bool):
         self.ba_active = active
@@ -201,7 +205,7 @@ class VisualOdometry(object):
                         # Pegamos os índices exatos onde a máscara é verdadeira (inliers)
                         inlier_indices = np.where(inlier_mask)[0]
                         
-                        if len(inlier_indices) > self.min_inliers:
+                        if len(inlier_indices) >= self.min_inliers:
                             # Filtra apenas os pontos válidos para triangulação de uma só vez
                             valid_ref_pts = ref_pts[inlier_indices]
                             valid_cur_pts = cur_pts[inlier_indices]
