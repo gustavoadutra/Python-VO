@@ -1,29 +1,25 @@
 dataset:
   name: ComplexUrbanDatasetLoader
-  root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/  #root_path: test_imgs
+  root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/  
   sequence: 'urban27'
   start: 0
   scale_factor: 0.25
   is_kaist: True  # Set to True for Kaist dataset, False for TUM dataset
   scale: 0.25
   
-
 detector:
-  name: SuperPointDetector
-  descriptor_dim: 256
-  nms_radius: 4
-  keypoint_threshold: 0.005
-  max_keypoints: -1
-  remove_borders: 4
+  name: XfeatDetector
   cuda: 1
+  top_k: 1000
+  #detection_threshold: 0.05
 
 matcher:
-  name: SuperGlueMatcher
-  descriptor_dim: 256
-  weights: "outdoor"
-  sinkhorn_iterations: 100
-  match_threshold: 0.2
-  cuda: 1
+  name: FrameByFrameMatcher
+  type: FLANN
+  FLANN:
+    kdTrees: 5
+    searchChecks: 50
+  distance_ratio: 0.75
 
 # Configurações de PnP
 pnp:

@@ -11,7 +11,7 @@ detector:
   name: XfeatDetector
   cuda: 1
   top_k: 1000
-  detection_threshold: 0
+  detection_threshold: 0.1
 
 matcher:
   name: LighterGlueMatcher
