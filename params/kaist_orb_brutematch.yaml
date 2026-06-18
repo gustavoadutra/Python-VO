@@ -5,7 +5,8 @@ dataset:
   start: 0
   scale_factor: 0.25
   is_kaist: True  # Set to True for Kaist dataset, False for TUM dataset
-
+  scale: 0.25
+  
 detector:
   name: HandcraftDetector
   type: ORB
@@ -36,7 +37,7 @@ pnp:
 
   min_depth: 0.00001
   max_depth: 100.0
-  min_absolute_scale: 0.1
+  min_absolute_scale: 0.01
 
   min_keypoints: 20
   min_distance_threshold: 5

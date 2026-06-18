@@ -14,11 +14,10 @@ def keypoints_plot(img, vo):
 
 
 class TrajPlotter(object):
-    def __init__(self, width=800, height=800, is_robot=False):
-        self.is_robot = is_robot
+    def __init__(self, width=800, height=800, scale=1):
         self.w, self.h = width, height
         self.offset_x, self.offset_y = self.w // 2, self.h // 2
-        self.scale = 200 if is_robot else 0.75
+        self.scale = scale
         self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
         
         # Estrutura simplificada usando dicionários

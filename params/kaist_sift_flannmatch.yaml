@@ -5,7 +5,7 @@ dataset:
   start: 0
   scale_factor: 0.25
   is_kaist: True  # Set to True for Kaist dataset, False for TUM dataset
-
+  scale: 0.25
 
 detector:
   name: HandcraftDetector

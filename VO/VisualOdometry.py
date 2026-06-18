@@ -139,7 +139,7 @@ class VisualOdometry(object):
                     reprojectionError=2.0
                 )
                 print(f"Frame {self.index}: PnP inliers = {len(inliers)} / {len(object_points_3d)}")
-                if success and inliers is not None and len(inliers) >= self.min_inliers:
+                if success and inliers is not None and len(inliers) > self.min_inliers:
                     use_pnp = True
                     R_cam2world, _ = cv2.Rodrigues(rvec)
                     prev_R = self.cur_R.copy()
@@ -205,7 +205,7 @@ class VisualOdometry(object):
                         # Pegamos os índices exatos onde a máscara é verdadeira (inliers)
                         inlier_indices = np.where(inlier_mask)[0]
                         
-                        if len(inlier_indices) >= self.min_inliers:
+                        if len(inlier_indices) > self.min_inliers:
                             # Filtra apenas os pontos válidos para triangulação de uma só vez
                             valid_ref_pts = ref_pts[inlier_indices]
                             valid_cur_pts = cur_pts[inlier_indices]

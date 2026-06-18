@@ -51,8 +51,9 @@ def run(args):
     is_robot = config["dataset"].get("is_robot", False)
     is_kaist = config["dataset"].get("is_kaist", False)
     is_cusco = config["dataset"].get("use_direct_position", False)
+    config_scale = config["dataset"].get("scale", 0.75)
 
-    traj_plotter = TrajPlotter(is_robot=is_robot)
+    traj_plotter = TrajPlotter(scale=config_scale)
 
     # Initialize Wheel Odometry
     wo = None

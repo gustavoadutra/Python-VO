@@ -6,7 +6,8 @@ dataset:
   start: 0
   is_robot: True
   use_direct_position: true
-  
+  scale: 200
+
 detector:
   name: XfeatDetector
   top_k: 3000
