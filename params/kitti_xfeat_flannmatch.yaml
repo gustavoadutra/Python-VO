@@ -15,12 +15,12 @@ detector:
 
 matcher:
   name: FrameByFrameMatcher
-  type: KNN
-  KNN:
-    HAMMING: False
-    first_N: 300
+  type: FLANN
+  FLANN:
+    kdTrees: 5
+    searchChecks: 50
   distance_ratio: 0.75
-
+  
 # Configurações de PnP
 pnp:
   min_3d_points: 10
