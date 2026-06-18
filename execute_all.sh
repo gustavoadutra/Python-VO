@@ -1,28 +1,33 @@
 #!/bin/bash
 
-# Define a pasta onde os arquivos estao
+# Define a pasta dos arquivos
 CONFIG_DIR="params"
+DATASET=$1
 
-# Verifica se a pasta existe
-if [ ! -d "$CONFIG_DIR" ]; then
-    echo "Erro: A pasta $CONFIG_DIR não foi encontrada."
+# Verifica se o usuário informou um dataset
+if [ -z "$DATASET" ]; then
+    echo "Uso: $0 [kaist|cusco|kitti]"
     exit 1
 fi
 
-# Loop pelos arquivos .yaml na pasta
-for config_file in "$CONFIG_DIR"/*.yaml; do
+# Converte o argumento para letras minúsculas para evitar erros de digitação
+DATASET=$(echo "$DATASET" | tr '[:upper:]' '[:lower:]')
+
+# Verifica se o dataset informado é válido
+if [[ "$DATASET" != "kaist" && "$DATASET" != "cusco" && "$DATASET" != "kitti" ]]; then
+    echo "Erro: Dataset inválido. Escolha entre: kaist, cusco ou kitti."
+    exit 1
+fi
+
+echo "Iniciando processamento para: $DATASET"
+
+# Executa apenas os arquivos que contêm o nome do dataset
+for config_file in "$CONFIG_DIR"/"$DATASET"_*.yaml; do
     echo "----------------------------------------------------"
     echo "Executando: python main.py --config $config_file"
     echo "----------------------------------------------------"
     
-    # Executa o comando
     python main.py --config "$config_file"
-    
-    # Opcional: Verifica se houve erro antes de continuar
-    if [ $? -ne 0 ]; then
-        echo "Erro ao executar $config_file. Encerrando."
-        exit 1
-    fi
 done
 
-echo "Todas as execuções foram concluídas."
+echo "Concluído: Todos os arquivos de $DATASET foram processados."
