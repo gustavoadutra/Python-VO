@@ -12,12 +12,12 @@ detector:
   name: XfeatDetector
   cuda: 1
   top_k: 2000
-  detection_threshold: 0.
+  detection_threshold: 0.1
 
 matcher:
   name: LighterGlueMatcher
   weights: /home/aki/Desktop/Python-VO/Detectors/accelerated_features/weights/xfeat-lighterglue.pt
-  min_conf: 0.0
+  min_conf: 0.1
   cuda: 1
 
 # Configurações de PnP
@@ -32,7 +32,7 @@ pnp:
   min_absolute_scale: 0.0001
 
   min_keypoints: 20
-  min_distance_threshold: 5
+  min_distance_threshold: 0.01
   min_observations_threshold: 3
 
 # Configurações de Bundle Adjustment e iSAM2

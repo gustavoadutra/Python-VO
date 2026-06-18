@@ -38,7 +38,7 @@ pnp:
   min_absolute_scale: 0.0001
 
   min_keypoints: 20
-  min_distance_threshold: 5
+  min_distance_threshold: 0.01
   min_observations_threshold: 3
 
 # Configurações de Bundle Adjustment e iSAM2

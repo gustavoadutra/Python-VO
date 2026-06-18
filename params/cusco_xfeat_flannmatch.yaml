@@ -10,7 +10,7 @@ dataset:
 
 detector:
   name: XfeatDetector
-  top_k: 3000
+  top_k: 1000
   detection_threshold: 0
   cuda: 1
 
@@ -31,7 +31,7 @@ pnp:
 
   min_depth: 0.00001
   max_depth: 100.0
-  min_absolute_scale: 0.0001
+  min_absolute_scale: 0.01
 
   min_keypoints: 20
   min_distance_threshold: 5
