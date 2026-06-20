@@ -127,9 +127,9 @@ def run(args):
 
         #current_scale = absscale.update(gt_pose)
         if is_cusco:
-            current_scale = absscale.update(0.01)
+            current_scale = 0.01
         else:
-            current_scale = absscale.update(1)
+            current_scale = 1
 
         # Update Visual Odometry
         R_vo, t_vo, rel_t_vo, rel_r_vo = vo.update(img, current_scale)
