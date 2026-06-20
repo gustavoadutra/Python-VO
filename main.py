@@ -126,9 +126,13 @@ def run(args):
             wo_pose[:3, 3] = t_wo.flatten()
 
         #current_scale = absscale.update(gt_pose)
+        if is_cusco:
+            current_scale = absscale.update(0.01)
+        else:
+            current_scale = absscale.update(1)
 
         # Update Visual Odometry
-        R_vo, t_vo, rel_t_vo, rel_r_vo = vo.update(img, absolute_scale=1)
+        R_vo, t_vo, rel_t_vo, rel_r_vo = vo.update(img, current_scale)
 
         # Bundle Adjustment (só quando --ba foi passado)
         ba_xyz = None
