@@ -2,7 +2,6 @@ import numpy as np
 import cv2
 import argparse
 import yaml
-import logging
 
 from utils.RSTPHandler import RSTPHandler
 
@@ -70,9 +69,6 @@ def run(args):
     if args.no_pnp:
         suffix += "_nopnp"
 
-    log_filename = f"results/{fname}{suffix}.txt"
-    log_fopen = open(log_filename, mode="a")
-
     # Initialize RTSP Handler
     rtsp_handler = None
     if args.rtsp:
@@ -90,13 +86,12 @@ def run(args):
             gt_pose[0, 3] = t_gt_orig[2]
             gt_pose[1, 3] = 0
             gt_pose[2, 3] = t_gt_orig[1]
-
         elif is_robot:
             gt_pose[0, 3] = t_gt_orig[1]
             gt_pose[1, 3] = 0
             gt_pose[2, 3] = t_gt_orig[0]
         elif is_kaist:
-            gt_pose[0, 3] = -t_gt_orig[0] # solves invert kaist direction
+            gt_pose[0, 3] = -t_gt_orig[0]
             gt_pose[1, 3] = 0
             gt_pose[2, 3] = t_gt_orig[2]
 
@@ -179,7 +174,6 @@ def run(args):
     # Usa a variável de sufixo para nomear a imagem também 
     output_image = f"results/{fname}{suffix}.png"
     cv2.imwrite(output_image, img2)
-    log_fopen.close()
 
     detector_name = config["detector"].get("type", config["detector"].get("name", "unknown"))
     matcher_name = config["matcher"].get("type", config["matcher"].get("name", "unknown"))
@@ -215,17 +209,10 @@ if __name__ == "__main__":
         help="If set, RTSP images will be displayed.",
     )
     parser.add_argument(
-        "--logging",
-        type=str,
-        default="INFO",
-        help="logging level: NOTSET, DEBUG, INFO, WARNING, ERROR, CRITICAL",
-    )
-    parser.add_argument(
         "--no-pnp",
         action="store_true",
         help="If set, PnP will be disabled and it will strictly use Essential Matrix.",
     )
 
     args = parser.parse_args()
-    logging.basicConfig(level=logging._nameToLevel[args.logging])
     run(args)
