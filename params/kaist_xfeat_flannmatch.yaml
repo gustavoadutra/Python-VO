@@ -9,9 +9,10 @@ dataset:
   
 detector:
   name: XfeatDetector
-  cuda: 1
+  type: XFEAT
   top_k: 1000
-  #detection_threshold: 0.05
+  detection_threshold: 0
+  cuda: 1
 
 matcher:
   name: FrameByFrameMatcher
@@ -20,6 +21,7 @@ matcher:
     kdTrees: 5
     searchChecks: 50
   distance_ratio: 0.75
+
 
 # Configurações de PnP
 pnp:

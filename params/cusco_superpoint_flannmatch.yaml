@@ -2,7 +2,7 @@ dataset:
   name: ComplexUrbanDatasetLoader
   root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/
   #root_path: test_imgs
-  sequence: cusco_dataset_3
+  sequence: cusco_dataset_1
   start: 0
   is_robot: True
   use_direct_position: true
@@ -10,6 +10,7 @@ dataset:
 
 detector:
   name: SuperPointDetector
+  type: SUPERPOINT
   descriptor_dim: 256
   nms_radius: 4
   keypoint_threshold: 0.005

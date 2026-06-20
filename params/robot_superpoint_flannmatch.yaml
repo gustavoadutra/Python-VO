@@ -5,9 +5,10 @@ dataset:
   sequence: dataset_20260321_115430/
   start: 0
   is_robot: True
-  
+
 detector:
   name: SuperPointDetector
+  type: SUPERPOINT
   descriptor_dim: 256
   nms_radius: 4
   keypoint_threshold: 0.005

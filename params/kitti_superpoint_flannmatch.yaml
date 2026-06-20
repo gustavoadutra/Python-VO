@@ -8,10 +8,11 @@ dataset:
   
 detector:
   name: SuperPointDetector
+  type: SUPERPOINT
   descriptor_dim: 256
   nms_radius: 4
   keypoint_threshold: 0.005
-  max_keypoints: 1000
+  max_keypoints: -1
   remove_borders: 4
   cuda: 1
 

@@ -5,17 +5,18 @@ dataset:
   sequence: dataset_20260321_115430/
   start: 0
   is_robot: True
-  
 detector:
   name: XfeatDetector
+  type: XFEAT
   cuda: 1
   top_k: 1000
-  detection_threshold: 0
+  detection_threshold: 0.1
 
 matcher:
   name: LighterGlueMatcher
+  type: LIGHT
   weights: /home/aki/Desktop/Python-VO/Detectors/accelerated_features/weights/xfeat-lighterglue.pt
-  min_conf: 0.0
+  min_conf: 0.1
   cuda: 1
 
 
