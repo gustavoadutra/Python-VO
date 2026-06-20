@@ -95,7 +95,10 @@ def run(args):
             gt_pose[0, 3] = t_gt_orig[1]
             gt_pose[1, 3] = 0
             gt_pose[2, 3] = t_gt_orig[0]
-
+        elif is_kaist:
+            gt_pose[0, 3] = -t_gt_orig[0] # solves invert kaist direction
+            gt_pose[1, 3] = 0
+            gt_pose[2, 3] = t_gt_orig[2]
 
         timestamp = loader.times[i]
         timestamp_prev = loader.times[i - 1] if i > 0 else timestamp
@@ -106,7 +109,7 @@ def run(args):
                 prev_timestamp=timestamp_prev,
                 cur_timestamp=timestamp
             )
-
+            # x and z are inverted in kaist dataset
             if is_kaist:
                 t_wo[0, 0] = (t_wo_raw[1]).item()
                 t_wo[1, 0] = 0

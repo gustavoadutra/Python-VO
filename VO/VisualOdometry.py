@@ -172,7 +172,6 @@ class VisualOdometry(object):
                 # prob eh a probabilidade encontrar a matriz perfeita
                 # threshold e a distancia de erro em pixel de onde ele deveria estar
                 # E eh a matriz essencial calculada, mask diz se eh inlier
-
                 E, mask = cv2.findEssentialMat(
                     ref_pts, cur_pts, cameraMatrix=self.K,
                     method=cv2.RANSAC, prob=0.999, threshold=1.0

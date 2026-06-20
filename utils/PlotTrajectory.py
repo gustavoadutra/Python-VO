@@ -33,13 +33,12 @@ class TrajPlotter(object):
             'ba': ((255, 0, 255), (255, 0, 255), "BA (Magenta)")
         }
 
-    def _get_xz(self, xyz, is_wo=False):
+    def _get_xz(self, xyz):
         if xyz is None:
             return None
-        idx_2 = 1 if is_wo else 2
         return np.array([
             float(np.asarray(xyz[0]).flat[0]), 
-            float(np.asarray(xyz[idx_2]).flat[0])
+            float(np.asarray(xyz[2]).flat[0])
         ])
 
     # --- NOVO: Conversão para o formato TUM ---
@@ -57,7 +56,6 @@ class TrajPlotter(object):
         
         return [timestamp, tx, ty, tz, qx, qy, qz, qw]
 
-    # --- NOVO: O update agora recebe o timestamp ---
     def update(self, timestamp, R_vo, t_vo, gt_pose, wo_pose=None, ba_xyz=None, image=None):
         
         # 1. Armazenar dados no formato TUM
@@ -85,7 +83,7 @@ class TrajPlotter(object):
         current_pts = {
             'gt': self._get_xz(gt_xyz),
             'vo': self._get_xz(t_vo),
-            'wo': self._get_xz(wo_xyz, is_wo=True),
+            'wo': self._get_xz(wo_xyz),
             'ba': self._get_xz(ba_xyz)
         }
 
