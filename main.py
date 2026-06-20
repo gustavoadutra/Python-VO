@@ -87,11 +87,15 @@ def run(args):
         t_gt_orig = gt_pose[:3, 3].copy()
         # Altera apenas a coluna de translação, preservando a matriz de rotação
         if is_cusco:
-            gt_pose[0, 3] = -t_gt_orig[2]
-            gt_pose[2, 3] = -t_gt_orig[1]
+            gt_pose[0, 3] = t_gt_orig[2]
+            gt_pose[1, 3] = 0
+            gt_pose[2, 3] = t_gt_orig[1]
+
         elif is_robot:
             gt_pose[0, 3] = t_gt_orig[1]
-            gt_pose[1, 3] = t_gt_orig[0]
+            gt_pose[1, 3] = 0
+            gt_pose[2, 3] = t_gt_orig[0]
+
 
         timestamp = loader.times[i]
         timestamp_prev = loader.times[i - 1] if i > 0 else timestamp
@@ -104,17 +108,17 @@ def run(args):
             )
 
             if is_kaist:
-                t_wo[0, 0] = (-t_wo_raw[1]).item()
-                t_wo[1, 0] = (t_wo_raw[0]).item()
-                t_wo[2, 0] = (t_wo_raw[2]).item()
+                t_wo[0, 0] = (t_wo_raw[1]).item()
+                t_wo[1, 0] = 0
+                t_wo[2, 0] = (t_wo_raw[0]).item()
             elif is_cusco:
                 t_wo[0, 0] = (-t_wo_raw[1]).item()
-                t_wo[1, 0] = (t_wo_raw[0]).item()
-                t_wo[2, 0] = (t_wo_raw[2]).item()
+                t_wo[1, 0] = 0
+                t_wo[2, 0] = (t_wo_raw[0]).item()
             elif is_robot:
                 t_wo[0, 0] = (t_wo_raw[0]).item()
-                t_wo[1, 0] = (-t_wo_raw[1]).item()
-                t_wo[2, 0] = (t_wo_raw[2]).item()
+                t_wo[1, 0] = 0
+                t_wo[2, 0] = (t_wo_raw[1]).item()
             else:
                 t_wo[0, 0] = 0.0
                 t_wo[1, 0] = 0.0

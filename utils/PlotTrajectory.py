@@ -119,8 +119,8 @@ class TrajPlotter(object):
                 cv2.putText(self.traj, text, (20, legend_y), cv2.FONT_HERSHEY_PLAIN, 1, self.styles[key][0], 1)
                 legend_y += 15
 
-        if image is not None:
-            return self._combine_image_and_trajectory(image)
+        #if image is not None:
+            #return self._combine_image_and_trajectory(image)
         return self.traj
 
     def _combine_image_and_trajectory(self, image):
