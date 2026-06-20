@@ -1,11 +1,10 @@
 import cv2
 import numpy as np
 import glob
-from tqdm import tqdm
 import logging
+import os
 
 from utils.PinholeCamera import PinholeCamera
-
 
 class KITTILoader(object):
     default_config = {"root_path": "../test_imgs", "sequence": "00", "start": 0}
@@ -31,9 +30,9 @@ class KITTILoader(object):
         else:
             raise ValueError(f"Unknown sequence number: {self.config['sequence']}")
 
-        # read ground truth pose
-        self.pose_path = (
-            self.config["root_path"] + "/poses/" + self.config["sequence"] + ".txt"
+        # 1. Carrega as poses (Ground Truth)
+        self.pose_path = os.path.join(
+            self.config["root_path"], "poses", self.config["sequence"] + ".txt"
         )
         self.gt_poses = []
         with open(self.pose_path) as f:
@@ -43,32 +42,35 @@ class KITTILoader(object):
                 pose = np.zeros((1, len(ss)))
                 for i in range(len(ss)):
                     pose[0, i] = float(ss[i])
-
                 pose.resize([3, 4])
                 self.gt_poses.append(pose)
 
-        # image id
-        self.img_id = self.config["start"]
-        self.img_N = len(
-            glob.glob(
-                pathname=self.config["root_path"]
-                + "/sequences/"
-                + self.config["sequence"]
-                + "/image_0/*.png"
-            )
+        # Carrega os Timestamps do arquivo times.txt
+        self.times_path = os.path.join(
+            self.config["root_path"], "sequences", self.config["sequence"], "times.txt"
         )
+        self.times = []
+        if os.path.exists(self.times_path):
+            with open(self.times_path) as f:
+                self.times = [float(line.strip()) for line in f.readlines()]
+        else:
+            logging.warning(f"Arquivo times.txt não encontrado em {self.times_path}! Usando índices falsos.")
+            # Fallback caso o arquivo não exista: usa o índice como segundo (0.0, 1.0, 2.0...)
+            self.times = [float(i) for i in range(len(self.gt_poses))]
+
+        # Verifica quantidade de imagens
+        self.img_id = self.config["start"]
+        img_pattern = os.path.join(
+            self.config["root_path"], "sequences", self.config["sequence"], "image_0", "*.png"
+        )
+        self.img_N = len(glob.glob(pathname=img_pattern))
 
     def get_cur_pose(self):
         return self.gt_poses[self.img_id - 1]
 
     def __getitem__(self, item):
-        file_name = (
-            self.config["root_path"]
-            + "/sequences/"
-            + self.config["sequence"]
-            + "/image_0/"
-            + str(item).zfill(6)
-            + ".png"
+        file_name = os.path.join(
+            self.config["root_path"], "sequences", self.config["sequence"], "image_0", str(item).zfill(6) + ".png"
         )
         img = cv2.imread(file_name)
         return img
@@ -78,18 +80,11 @@ class KITTILoader(object):
 
     def __next__(self):
         if self.img_id < self.img_N:
-            file_name = (
-                self.config["root_path"]
-                + "/sequences/"
-                + self.config["sequence"]
-                + "/image_0/"
-                + str(self.img_id).zfill(6)
-                + ".png"
+            file_name = os.path.join(
+                self.config["root_path"], "sequences", self.config["sequence"], "image_0", str(self.img_id).zfill(6) + ".png"
             )
             img = cv2.imread(file_name)
-
             self.img_id += 1
-
             return img
         raise StopIteration()
 

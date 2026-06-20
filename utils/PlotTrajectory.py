@@ -2,6 +2,7 @@ import csv
 import os
 import cv2
 import numpy as np
+from scipy.spatial.transform import Rotation as R_scipy
 
 from .tools import plot_keypoints
 
@@ -12,7 +13,6 @@ def keypoints_plot(img, vo):
         img, vo.kptdescs["cur"]["keypoints"], vo.kptdescs["cur"]["scores"]
     )
 
-
 class TrajPlotter(object):
     def __init__(self, width=800, height=800, scale=1):
         self.w, self.h = width, height
@@ -20,11 +20,12 @@ class TrajPlotter(object):
         self.scale = scale
         self.traj = np.zeros((self.h, self.w, 3), dtype=np.uint8)
         
-        # Estrutura simplificada usando dicionários
+        # Armazena as Poses no formato TUM
+        self.poses_tum = {'gt': [], 'vo': [], 'wo': [], 'ba': []}
+        
         self.positions = {'gt': [], 'vo': [], 'wo': [], 'ba': []}
         self.errors = {'vo': [], 'wo': [], 'ba': []}
         
-        # Configuração de Estilos: (Cor do Ponto, Cor da Linha, Rótulo)
         self.styles = {
             'gt': ((0, 0, 255), (0, 0, 255), "GT (Red)"),
             'vo': ((0, 255, 0), (50, 200, 50), "VO (Green)"),
@@ -33,60 +34,83 @@ class TrajPlotter(object):
         }
 
     def _get_xz(self, xyz, is_wo=False):
-        """Método auxiliar para extrair coordenadas 2D uniformemente."""
         if xyz is None:
             return None
-        # O Wheel Odometry no seu código original usava os índices 0 e 1 (x, y)
         idx_2 = 1 if is_wo else 2
         return np.array([
             float(np.asarray(xyz[0]).flat[0]), 
             float(np.asarray(xyz[idx_2]).flat[0])
         ])
 
-    def update(self, est_xyz, gt_xyz, wo_xyz=None, ba_xyz=None, image=None):
-        """Atualiza a plotagem e calcula erros instantâneos."""
+    # --- NOVO: Conversão para o formato TUM ---
+    def _format_tum_pose(self, timestamp, R, t):
+        """Converte timestamp, R (3x3) e t (3x1) para a lista do TUM [timestamp, x, y, z, qx, qy, qz, qw]"""
+        if R is None or t is None or timestamp is None:
+            return None
         
-        # Agrupa os pontos atuais (Extraindo X e Z de forma segura)
+        # Garante que a translação seja 1D
+        tx, ty, tz = float(t[0]), float(t[1]), float(t[2])
+        
+        # Converte a matriz de rotação 3x3 para quatérnio (Scipy retorna no formato x, y, z, w por padrão)
+        r_quat = R_scipy.from_matrix(R).as_quat()
+        qx, qy, qz, qw = r_quat
+        
+        return [timestamp, tx, ty, tz, qx, qy, qz, qw]
+
+    # --- NOVO: O update agora recebe o timestamp ---
+    def update(self, timestamp, R_vo, t_vo, gt_pose, wo_pose=None, ba_xyz=None, image=None):
+        
+        # 1. Armazenar dados no formato TUM
+        if gt_pose is not None and timestamp is not None:
+            R_gt = gt_pose[:3, :3]
+            t_gt = gt_pose[:3, 3]
+            self.poses_tum['gt'].append(self._format_tum_pose(timestamp, R_gt, t_gt))
+            
+        if R_vo is not None and t_vo is not None and timestamp is not None:
+            self.poses_tum['vo'].append(self._format_tum_pose(timestamp, R_vo, t_vo))
+            
+        if wo_pose is not None and timestamp is not None:
+            R_wo = wo_pose[:3, :3]
+            t_wo = wo_pose[:3, 3]
+            self.poses_tum['wo'].append(self._format_tum_pose(timestamp, R_wo, t_wo))
+            
+        if ba_xyz is not None and timestamp is not None:
+            # Assume identidade para a rotação se o BA retornar apenas posições 3D
+            self.poses_tum['ba'].append(self._format_tum_pose(timestamp, np.eye(3), ba_xyz))
+
+        # 2. Lógica existente para plotagem 2D (invariada)
+        gt_xyz = gt_pose[:3, 3] if gt_pose is not None else None
+        wo_xyz = wo_pose[:3, 3] if wo_pose is not None else None
+
         current_pts = {
             'gt': self._get_xz(gt_xyz),
-            'vo': self._get_xz(est_xyz),
+            'vo': self._get_xz(t_vo),
             'wo': self._get_xz(wo_xyz, is_wo=True),
             'ba': self._get_xz(ba_xyz)
         }
 
-        # Atualiza o histórico de posições e calcula o erro pontual em relação ao GT
         gt_pt = current_pts['gt']
         for key, pt in current_pts.items():
             if pt is not None:
                 self.positions[key].append(pt)
-                if key != 'gt':
+                if key != 'gt' and gt_pt is not None:
                     self.errors[key].append(np.linalg.norm(pt - gt_pt))
 
-        # Desenha a trajetória
         for key, pt in current_pts.items():
             if pt is None:
                 continue
-                
             pt_color, line_color, _ = self.styles[key]
-            
-            # Coordenadas de desenho na tela
             draw_x = int(pt[0] * self.scale) + self.offset_x
             draw_y = int(pt[1] * self.scale) + self.offset_y
-            
-            # Desenha o ponto atual
             cv2.circle(self.traj, (draw_x, draw_y), 1, pt_color, 1)
 
-            # Desenha a linha conectando ao frame anterior
             if len(self.positions[key]) > 1:
                 prev_pt = self.positions[key][-2]
                 prev_x = int(prev_pt[0] * self.scale) + self.offset_x
                 prev_y = int(prev_pt[1] * self.scale) + self.offset_y
                 cv2.line(self.traj, (prev_x, prev_y), (draw_x, draw_y), line_color, 1)
 
-        # UI e Legendas
         cv2.rectangle(self.traj, (10, 20), (600, 100), (0, 0, 0), -1)
-        #cv2.putText(self.traj, self.styles['gt'][2], (280, 40), cv2.FONT_HERSHEY_PLAIN, 1, self.styles['gt'][0], 1)
-        
         legend_y = 40
         for key in ['vo', 'wo', 'ba']:
             if len(self.errors[key]) > 0:
@@ -97,183 +121,40 @@ class TrajPlotter(object):
 
         if image is not None:
             return self._combine_image_and_trajectory(image)
-        
         return self.traj
 
     def _combine_image_and_trajectory(self, image):
-        # Apenas mantive a sua lógica inalterada
         if len(image.shape) == 2:
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-        
         img_h, img_w = image.shape[:2]
         traj_h, traj_w = self.traj.shape[:2]
-        
         if img_h < traj_h:
             pad_top = (traj_h - img_h) // 2
             pad_bottom = traj_h - img_h - pad_top
             image = cv2.copyMakeBorder(image, pad_top, pad_bottom, 0, 0, cv2.BORDER_CONSTANT, value=[0, 0, 0])
         elif img_h > traj_h:
             image = cv2.resize(image, (img_w, traj_h))
-        
         return np.hstack([image, self.traj])
 
-    def calculate_metrics(self, align_trajectories=True):
-        """
-        Calcula o ATE e RPE. Se align_trajectories=True, aplica o Umeyama 
-        antes de computar as métricas para remover offsets globais de Referencial/Escala.
-        """
-        metrics = {}
-        gt = np.array(self.positions['gt'])
+    # Função que salva todas as trajetórias em formato TUM 
+    def save_trajectories_tum(self, config, detector_name="", matcher_name="", extra_suffix="", output_folder="results"):
+        sequence = config['dataset'].get('sequence', 'unknown')
+        seq_folder = os.path.join(output_folder, sequence)
+        os.makedirs(seq_folder, exist_ok=True)
         
-        for key in ['vo', 'wo', 'ba']:
-            est = np.array(self.positions[key])
-            
-            if len(est) < 2 or len(est) != len(gt):
+        name_prefix = f"{detector_name}_{matcher_name}" if detector_name and matcher_name else ""
+        
+        for key in ['gt', 'vo', 'wo', 'ba']:
+            if not self.poses_tum[key]:
                 continue
                 
-            # Alinha a estimativa ao GT usando Umeyama
-            if align_trajectories:
-                # with_scale=True é fundamental para Odometria Monocular
-                est_aligned = self.align_umeyama(est, gt, with_scale=True) 
-            else:
-                est_aligned = est
-                
-            # 1. ATE: RMSE das distâncias de translação globais (Est_Alinhada - GT)
-            ate = np.sqrt(np.mean(np.sum((est_aligned - gt)**2, axis=1)))
+            base_name = f"{sequence}_{key}_{name_prefix}{extra_suffix}.txt" if name_prefix else f"{sequence}_{key}{extra_suffix}.txt"
+            txt_filename = os.path.join(seq_folder, base_name)
             
-            # 2. RPE: RMSE das translações relativas (Frame a Frame)
-            est_delta = est_aligned[1:] - est_aligned[:-1]
-            gt_delta = gt[1:] - gt[:-1]
-            rpe = np.sqrt(np.mean(np.sum((est_delta - gt_delta)**2, axis=1)))
-            
-            metrics[key] = {'ATE': ate, 'RPE': rpe}
-            
-        return metrics
-    
-    def save_errors_to_csv(self, config, detector_name="", matcher_name="", extra_suffix="", output_folder="data"):
-        sequence = config['dataset'].get('sequence', 'unknown')
-        seq_folder = os.path.join(output_folder, sequence)
-        os.makedirs(seq_folder, exist_ok=True)
-        
-        # Junta o nome do detector e matcher
-        name_prefix = f"{detector_name}_{matcher_name}" if detector_name and matcher_name else ""
-        
-        # Adiciona o sufixo extra (ex: _ba_nopnp)
-        if name_prefix:
-            base_name = f"{name_prefix}{extra_suffix}_errors.csv"
-        else:
-            base_name = f"errors{extra_suffix}.csv"
-            
-        csv_filename = os.path.join(seq_folder, base_name)
-        
-        max_len = max([len(v) for v in self.errors.values()] + [0])
-        metrics = self.calculate_metrics()
-        
-        with open(csv_filename, mode='w', newline='') as csv_file:
-            if detector_name or matcher_name:
-                csv_file.write(f"# Detector: {detector_name}\n")
-                csv_file.write(f"# Matcher: {matcher_name}\n")
-            
-            for key, res in metrics.items():
-                csv_file.write(f"# {key.upper()} - ATE: {res['ATE']:.4f} | RPE: {res['RPE']:.4f}\n")
-            
-            fieldnames = ['Frame', 'VO_Error', 'WO_Error', 'BA_Error']
-            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-            writer.writeheader()
-            
-            for i in range(max_len):
-                writer.writerow({
-                    'Frame': i,
-                    'VO_Error': self.errors['vo'][i] if i < len(self.errors['vo']) else '',
-                    'WO_Error': self.errors['wo'][i] if i < len(self.errors['wo']) else '',
-                    'BA_Error': self.errors['ba'][i] if i < len(self.errors['ba']) else '',
-                })
-        
-        print(f"[INFO] Errors saved to {csv_filename}")
-        for key, res in metrics.items():
-            print(f"[INFO] {key.upper()} Final Metrics -> ATE: {res['ATE']:.4f}m, RPE: {res['RPE']:.4f}m")
-
-    def save_positions_to_csv(self, config, detector_name="", matcher_name="", extra_suffix="", output_folder="data"):
-        sequence = config['dataset'].get('sequence', 'unknown')
-        seq_folder = os.path.join(output_folder, sequence)
-        os.makedirs(seq_folder, exist_ok=True)
-        
-        # Junta o nome do detector e matcher
-        name_prefix = f"{detector_name}_{matcher_name}" if detector_name and matcher_name else ""
-        
-        # Adiciona o sufixo extra (ex: _ba_nopnp)
-        if name_prefix:
-            base_name = f"{name_prefix}{extra_suffix}_positions.csv"
-        else:
-            base_name = f"positions{extra_suffix}.csv"
-            
-        csv_filename = os.path.join(seq_folder, base_name)
-        
-        max_len = max([len(v) for v in self.positions.values()] + [0])
-        
-        with open(csv_filename, mode='w', newline='') as csv_file:
-            if detector_name or matcher_name:
-                csv_file.write(f"# Detector: {detector_name}\n")
-                csv_file.write(f"# Matcher: {matcher_name}\n")
-            
-            fieldnames = ['Frame', 'GT_X', 'GT_Z', 'VO_X', 'VO_Z', 'WO_X', 'WO_Z', 'BA_X', 'BA_Z']
-            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-            writer.writeheader()
-            
-            for i in range(max_len):
-                row_data = {'Frame': i}
-                for key in ['gt', 'vo', 'wo', 'ba']:
-                    prefix = key.upper()
-                    if i < len(self.positions[key]):
-                        row_data[f'{prefix}_X'] = self.positions[key][i][0]
-                        row_data[f'{prefix}_Z'] = self.positions[key][i][1]
-                    else:
-                        row_data[f'{prefix}_X'] = ''
-                        row_data[f'{prefix}_Z'] = ''
-                
-                writer.writerow(row_data)
-        
-        print(f"[INFO] Positions saved to {csv_filename}")
-        
-    def align_umeyama(self, model, data, with_scale=True):
-        """
-        Alinha a trajetória estimada (model) à trajetória real (data) 
-        usando o algoritmo de Umeyama.
-        """
-        # Centraliza os pontos nas origens de seus respectivos referenciais
-        mu_M = model.mean(axis=0)
-        mu_D = data.mean(axis=0)
-
-        model_zero = model - mu_M
-        data_zero = data - mu_D
-
-        # Matriz de covariância
-        C = (model_zero.T @ data_zero) / model.shape[0]
-
-        # Decomposição em Valores Singulares (SVD)
-        U, S, Vt = np.linalg.svd(C)
-        V = Vt.T
-
-        # Matriz para lidar com o problema de reflexão
-        d = np.linalg.det(V @ U.T)
-        D = np.eye(model.shape[1])
-        if d < 0:
-            D[-1, -1] = -1
-
-        # Rotação ótima (R)
-        R = V @ D @ U.T
-
-        # Escala ótima (c)
-        if with_scale:
-            var_M = np.var(model_zero, axis=0).sum()
-            scale = (1.0 / var_M) * np.sum(S) if var_M > 0 else 1.0
-        else:
-            scale = 1.0
-
-        # Translação ótima (t)
-        t = mu_D - scale * (R @ mu_M)
-
-        # Aplica as transformações na trajetória original
-        model_aligned = scale * (model @ R.T) + t
-
-        return model_aligned
+            with open(txt_filename, mode='w') as txt_file:
+                for pose in self.poses_tum[key]:
+                    # Formato TUM: timestamp x y z qx qy qz qw
+                    line = f"{pose[0]:.6f} {pose[1]:.6e} {pose[2]:.6e} {pose[3]:.6e} {pose[4]:.6e} {pose[5]:.6e} {pose[6]:.6e} {pose[7]:.6e}"
+                    txt_file.write(line + "\n")
+                    
+            print(f"[INFO] Trajetória {key.upper()} salva no formato TUM em: {txt_filename}")

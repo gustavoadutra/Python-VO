@@ -17,7 +17,6 @@ from utils.PlotTrajectory import TrajPlotter, keypoints_plot
 
 def run(args):
     # Initialize variables for Wheel Odometry
-    yaw_wo = 0.0
     t_wo = np.zeros((3, 1))
     wo_pose = np.eye(4)
 
@@ -84,17 +83,21 @@ def run(args):
         gt_pose = loader.get_cur_pose()
 
         # Correcting the order of gt_pose for robot datasets
+        # Guarda a translação original para evitar sobrescritas durante as trocas
+        t_gt_orig = gt_pose[:3, 3].copy()
+        # Altera apenas a coluna de translação, preservando a matriz de rotação
         if is_cusco:
-            gt_pose[0] = -gt_pose[2]
-            gt_pose[2] = -gt_pose[1]
+            gt_pose[0, 3] = -t_gt_orig[2]
+            gt_pose[2, 3] = -t_gt_orig[1]
         elif is_robot:
-            gt_pose[0], gt_pose[1] = gt_pose[1], gt_pose[0]
+            gt_pose[0, 3] = t_gt_orig[1]
+            gt_pose[1, 3] = t_gt_orig[0]
+
+        timestamp = loader.times[i]
+        timestamp_prev = loader.times[i - 1] if i > 0 else timestamp
 
         # Wheel Odometry update
         if wo:
-            timestamp = loader.times[i]
-            timestamp_prev = loader.times[i - 1] if i > 0 else timestamp
-
             yaw_wo, R_wo, t_wo_raw, w_wo, v_wo = wo.update(
                 prev_timestamp=timestamp_prev,
                 cur_timestamp=timestamp
@@ -103,7 +106,7 @@ def run(args):
             if is_kaist:
                 t_wo[0, 0] = (-t_wo_raw[1]).item()
                 t_wo[1, 0] = (t_wo_raw[0]).item()
-                t_wo[2, 0] = 0.0
+                t_wo[2, 0] = (t_wo_raw[2]).item()
             elif is_cusco:
                 t_wo[0, 0] = (-t_wo_raw[1]).item()
                 t_wo[1, 0] = (t_wo_raw[0]).item()
@@ -120,10 +123,10 @@ def run(args):
             wo_pose[:3, :3] = R_wo
             wo_pose[:3, 3] = t_wo.flatten()
 
-        current_scale = absscale.update(gt_pose)
+        #current_scale = absscale.update(gt_pose)
 
         # Update Visual Odometry
-        R_vo, t_vo, rel_t_vo, rel_r_vo = vo.update(img, absolute_scale=current_scale)
+        R_vo, t_vo, rel_t_vo, rel_r_vo = vo.update(img, absolute_scale=1)
 
         # Bundle Adjustment (só quando --ba foi passado)
         ba_xyz = None
@@ -141,27 +144,16 @@ def run(args):
             except Exception as e:
                 print(f"[BA ERROR] {e}")
 
-        # Logging
-        wo_log = t_wo if t_wo is not None else np.zeros((3, 1))
-
-        print(
-            i,
-            t_vo[0, 0],
-            t_vo[1, 0],
-            t_vo[2, 0],
-            gt_pose[0, 3],
-            gt_pose[1, 3],
-            gt_pose[2, 3],
-            wo_log[0, 0],
-            wo_log[1, 0],
-            wo_log[2, 0],
-            file=log_fopen,
-        )
-
         # Visualization
         img1 = keypoints_plot(img, vo)
         img2 = traj_plotter.update(
-            t_vo, gt_pose[:, 3], wo_xyz=t_wo, ba_xyz=ba_xyz, image=img
+            timestamp=timestamp, 
+            R_vo=R_vo, 
+            t_vo=t_vo, 
+            gt_pose=gt_pose, 
+            wo_pose=wo_pose if wo else None, 
+            ba_xyz=ba_xyz, 
+            image=img
         )
 
         trajectory_window = "trajectory_ba" if ba_obj else "trajectory"
@@ -177,23 +169,15 @@ def run(args):
         if cv2.waitKey(10) == 27:
             break
 
-    # --- NOVO: Usa a variável de sufixo para nomear a imagem também ---
+    # Usa a variável de sufixo para nomear a imagem também 
     output_image = f"results/{fname}{suffix}.png"
     cv2.imwrite(output_image, img2)
     log_fopen.close()
 
     detector_name = config["detector"].get("type", config["detector"].get("name", "unknown"))
     matcher_name = config["matcher"].get("type", config["matcher"].get("name", "unknown"))
-    
-    # Passando a variável `suffix` para garantir o mesmo padrão de nomenclatura
-    traj_plotter.save_errors_to_csv(
-        config, 
-        detector_name=detector_name, 
-        matcher_name=matcher_name, 
-        extra_suffix=suffix
-    )
-    
-    traj_plotter.save_positions_to_csv(
+
+    traj_plotter.save_trajectories_tum(
         config, 
         detector_name=detector_name, 
         matcher_name=matcher_name, 
