@@ -5,14 +5,14 @@ dataset:
   sequence: '00'
   start: 0
   scale_factor: 0.75
-  
+
 detector:
   name: SuperPointDetector
   type: SUPERPOINT
   descriptor_dim: 256
   nms_radius: 4
   keypoint_threshold: 0.005
-  max_keypoints: 1000
+  max_keypoints: 2000
   remove_borders: 4
   cuda: 1
 

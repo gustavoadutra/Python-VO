@@ -4,20 +4,21 @@ dataset:
   sequence: 'urban27'
   start: 0
   scale_factor: 0.25
-  is_kaist: True  # Set to True for Kaist dataset, False for TUM dataset
+  is_kaist: true  # Set to True for Kaist dataset, False for TUM dataset
   scale: 0.25
 
 detector:
   name: XfeatDetector
   type: XFEAT
   cuda: 1
-  top_k: 1000
+  top_k: 2000
   detection_threshold: 0.1
 
 matcher:
   name: LighterGlueMatcher
   type: LIGHT
-  weights: /home/aki/Desktop/Python-VO/Detectors/accelerated_features/weights/xfeat-lighterglue.pt
+  weights: 
+    /home/aki/Desktop/Python-VO/Detectors/accelerated_features/weights/xfeat-lighterglue.pt
   min_conf: 0.1
   cuda: 1
 

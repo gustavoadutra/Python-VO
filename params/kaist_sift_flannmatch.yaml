@@ -4,14 +4,14 @@ dataset:
   sequence: 'urban27'
   start: 0
   scale_factor: 0.25
-  is_kaist: True  # Set to True for Kaist dataset
+  is_kaist: true  # Set to True for Kaist dataset
   scale: 0.25
 
 detector:
   name: HandcraftDetector
   type: SIFT
   SIFT:
-    nfeatures: 1000
+    nfeatures: 2000
     nOctaveLayers: 3
     contrastThreshold: 0.04
     edgeThreshold: 10

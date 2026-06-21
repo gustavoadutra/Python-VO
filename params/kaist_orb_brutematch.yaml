@@ -4,14 +4,14 @@ dataset:
   sequence: 'urban27'
   start: 0
   scale_factor: 0.25
-  is_kaist: True  # Set to True for Kaist dataset, False for TUM dataset
+  is_kaist: true  # Set to True for Kaist dataset, False for TUM dataset
   scale: 0.25
-  
+
 detector:
   name: HandcraftDetector
   type: ORB
   ORB:
-    nfeatures: 1000
+    nfeatures: 2000
     scaleFactor: 1.2
     nLevels: 8
     edgeThreshold: 31
@@ -24,7 +24,7 @@ matcher:
   name: FrameByFrameMatcher
   type: KNN
   KNN:
-    HAMMING: True  # For ORB Binary descriptor, only can use hamming matching
+    HAMMING: true  # For ORB Binary descriptor, only can use hamming matching
     first_N: 300 # For hamming matching, use first N min matches
   distance_ratio: 0.75
 

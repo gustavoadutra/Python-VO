@@ -143,6 +143,11 @@ class LightGlueMatcher(object):
             match_obj = LightGlueMatch(queryIdx=int(idx_ref), trainIdx=int(idx_cur), distance=float(1.0 - score))
             self.good.append([match_obj])
 
+        # Mesma convenção do FrameByFrameMatcher: melhor match primeiro (menor distância).
+        # Sem isso, qualquer truncamento downstream (ex: usar só os top-K matches) pega
+        # uma fatia em ordem arbitrária em vez dos mais confiáveis.
+        self.good = sorted(self.good, key=lambda x: x[0].distance)
+
         return self.good
 
     def get_good_keypoints(self, kptdescs=None):

@@ -9,7 +9,7 @@ dataset:
 detector:
   name: XfeatDetector
   type: XFEAT
-  top_k: 1000
+  top_k: 2000
   detection_threshold: 0
   cuda: 1
 

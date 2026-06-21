@@ -1,15 +1,15 @@
 dataset:
   name: ComplexUrbanDatasetLoader
-  root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/  
+  root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/
   sequence: 'urban27'
   start: 0
-  is_kaist: True  # Set to True for Kaist dataset, False for TUM dataset
+  is_kaist: true  # Set to True for Kaist dataset, False for TUM dataset
   scale: 0.25
-  
+
 detector:
   name: XfeatDetector
   type: XFEAT
-  top_k: 1000
+  top_k: 2000
   cuda: 1
 
 matcher:
