@@ -26,6 +26,11 @@ class HandcraftDetector(object):
         },
     }
 
+    # Fator de magnificação da região de suporte (mesmo "mrSize" usado pelo
+    # kornia/kornia_moons para converter keypoints OpenCV em LAFs). Para SIFT
+    # o valor padrão de toda a stack kornia é 6.0; para ORB, 1.0 (sem magnificação).
+    _MR_SIZE = {"SIFT": 6.0, "ORB": 1.0}
+
     def __init__(self, config={}):
         self.config = self.default_config
         self.config = {**self.config, **config}
@@ -65,29 +70,29 @@ class HandcraftDetector(object):
         logging.debug("keypoint detecting and computing...")
         kpts_cv, desc = self.det.detectAndCompute(image, None)
 
+        mr_size = self._MR_SIZE.get(self.config["type"], 1.0)
+
         kpts = np.zeros((len(kpts_cv), 2))
         scores = np.zeros((len(kpts_cv)))
+        scales = np.zeros((len(kpts_cv)))
+        oris = np.zeros((len(kpts_cv)))
         for i, p in enumerate(kpts_cv):
             kpts[i, 0] = p.pt[0]
             kpts[i, 1] = p.pt[1]
             scores[i] = p.response
+            scales[i] = mr_size * p.size
+            ori = np.deg2rad(-p.angle)
+            if ori < 0:
+                ori += 2.0 * np.pi
+            oris[i] = ori
 
         return {
-            "image_size": np.array([image.shape[0], image.shape[1]]),
+            "image_size": np.array([image.shape[1], image.shape[0]]),
             "keypoints": kpts,
             "scores": scores,
             "descriptors": desc,
+            "scales": scales,
+            "oris": oris,
         }
 
 
-if __name__ == "__main__":
-    img0 = cv2.imread("../test_imgs/sequences/00/image_0/000000.png")
-
-    handcraft_detector = HandcraftDetector({"type": "SIFT"})
-    kptdesc = handcraft_detector(img0)
-
-    img = plot_keypoints(
-        img0, kptdesc["keypoints"], kptdesc["scores"] / kptdesc["scores"].max()
-    )
-    cv2.imshow("SIFT", img)
-    cv2.waitKey()

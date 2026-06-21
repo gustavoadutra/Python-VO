@@ -1,6 +1,7 @@
 from .FrameByFrameMatcher import FrameByFrameMatcher
 from .SuperGlueMatcher import SuperGlueMatcher
 from .LighterGlueMatcher import LighterGlueMatcher
+from .LightGlueMatcher import LightGlueMatcher
 
 
 def create_matcher(conf):
