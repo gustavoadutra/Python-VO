@@ -20,7 +20,7 @@ detector:
 matcher:
   name: LightGlueMatcher
   type: LIGHT
-  features: sift
+  features: superpoint
   min_conf: 0.1
 
 # Configurações de PnP
