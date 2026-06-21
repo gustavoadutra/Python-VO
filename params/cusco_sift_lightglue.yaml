@@ -12,17 +12,18 @@ detector:
   name: HandcraftDetector
   type: SIFT
   SIFT:
-    nfeatures: 1000
+    nfeatures: 2000
     nOctaveLayers: 3
     contrastThreshold: 0.04
     edgeThreshold: 10
     sigma: 1.6
 
+
 matcher:
   name: LightGlueMatcher
   type: LIGHT
   features: sift
-  add_scale_ori: True
+  min_conf: 0.1
 
 # Configurações de PnP
 pnp:

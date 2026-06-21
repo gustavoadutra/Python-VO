@@ -11,9 +11,8 @@ dataset:
 detector:
   name: XfeatDetector
   type: XFEAT
+  top_k: 2000
   cuda: 1
-  top_k: 1000
-  detection_threshold: 0.1
 
 matcher:
   name: LighterGlueMatcher
