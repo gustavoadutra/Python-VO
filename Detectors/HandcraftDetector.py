@@ -70,6 +70,12 @@ class HandcraftDetector(object):
         logging.debug("keypoint detecting and computing...")
         kpts_cv, desc = self.det.detectAndCompute(image, None)
 
+        # Normalização L2 obrigatória para o LightGlue
+        # para o flannmatch nao faz diferenca
+        if self.config["type"] == "SIFT":
+            norm = np.linalg.norm(desc, axis=1, keepdims=True)
+            desc = np.divide(desc, norm, out=np.zeros_like(desc), where=norm!=0)
+
         mr_size = self._MR_SIZE.get(self.config["type"], 1.0)
 
         kpts = np.zeros((len(kpts_cv), 2))
