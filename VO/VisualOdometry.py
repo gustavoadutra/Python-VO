@@ -78,7 +78,9 @@ class VisualOdometry(object):
             self.kptdescs["cur"] = kptdesc
 
         # Se for o primeiro descritor
+        # apenas retorna as matrizes vazias
         if self.index == 0 or "ref" not in self.kptdescs:
+            print("[VO WARNING] Primeiro frame.")
             self.kptdescs["ref"] = self.kptdescs["cur"]
             self.index += 1
             return self.cur_R, self.cur_t, None, None
@@ -209,7 +211,7 @@ class VisualOdometry(object):
                         valid_ref_pts = ref_pts[inlier_indices]
                         valid_cur_pts = cur_pts[inlier_indices]
 
-                        # Triangula todos os pontos válidos de uma só vez (Fora do laço!)
+                        # Triangula todos os pontos válidos de uma só vez 
                         pts4d_all = cv2.triangulatePoints(P1, P2, valid_ref_pts.T, valid_cur_pts.T)
                         
                         # Converte de coordenadas homogêneas (4D) para euclidianas (3D) dividindo por W
@@ -284,20 +286,13 @@ class VisualOdometry(object):
         return observations, landmark_initials
     
     def _should_create_keyframe(self, ref_pts, cur_pts):
-        if len(ref_pts) == 0 or len(cur_pts) == 0:
-            return False
-        
-        # Paralaxe média entre os pontos matchados
-        flow = cur_pts - ref_pts
-        mean_parallax = np.mean(np.linalg.norm(flow, axis=1))
-        
+                
         # Taxa de rastreamento (quantos pontos do ref ainda aparecem no cur)
         tracking_rate = len(cur_pts) / max(self.num_ref_keypoints, 1)
-        
-        parallax_ok  = mean_parallax > self.min_parallax
+        print(f"Tracking rate:{tracking_rate} cur {len(cur_pts)} ref {max(self.num_ref_keypoints, 1)}")
         tracking_low = tracking_rate < self.min_track_rate 
         
-        return parallax_ok or tracking_low
+        return tracking_low
 
 class AbsoluteScaleComputer(object):
     def __init__(self):

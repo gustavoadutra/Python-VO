@@ -57,7 +57,7 @@ class FrameByFrameMatcher(object):
         else:
             logging.debug("FLANN keypoints matching...")
             matches = self.matcher.knnMatch(kptdescs["ref"]["descriptors"], kptdescs["cur"]["descriptors"], k=2)
-            # Apply ratio test
+            # Apply ratio test lowes test
             for m, n in matches:
                 if m.distance < self.config["distance_ratio"] * n.distance:
                     self.good.append([m])
@@ -66,7 +66,8 @@ class FrameByFrameMatcher(object):
         return self.good
 
     def get_good_keypoints(self, kptdescs):
-        logging.debug("getting matched keypoints...")
+        # Transforma os matches em arrays do numpy
+        # match score nao esta sendo usado
         kp_ref = np.zeros([len(self.good), 2])
         kp_cur = np.zeros([len(self.good), 2])
         match_dist = np.zeros([len(self.good)])
