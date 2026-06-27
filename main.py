@@ -2,9 +2,11 @@ import numpy as np
 import cv2
 import argparse
 import yaml
+import time
+import os
+import csv
 
 from utils.RSTPHandler import RSTPHandler
-
 from DataLoader import create_dataloader
 from Detectors import create_detector
 from Matchers import create_matcher
@@ -12,6 +14,34 @@ from VO.VisualOdometry import VisualOdometry, AbsoluteScaleComputer
 from VO.BundleAdjustment import GTSAMBundleAdjuster
 from WO.WheelOdometry import WheelOdometry
 from utils.PlotTrajectory import TrajPlotter, keypoints_plot
+
+# ==============================================================================
+# CLASSE WRAPPER PARA PROFILING DE TEMPO
+# Intercepta as chamadas do detector e matcher para medir o tempo sem alterar o VO
+# ==============================================================================
+class ProfilingWrapper:
+    def __init__(self, obj):
+        self._obj = obj
+        self.total_time = 0.0
+
+    # Intercepta chamadas de métodos normais (ex: obj.metodo())
+    def __getattr__(self, name):
+        attr = getattr(self._obj, name)
+        if callable(attr):
+            def wrapper(*args, **kwargs):
+                start = time.perf_counter()
+                result = attr(*args, **kwargs)
+                self.total_time += time.perf_counter() - start
+                return result
+            return wrapper
+        return attr
+
+    # Intercepta chamadas diretas ao objeto (ex: obj())
+    def __call__(self, *args, **kwargs):
+        start = time.perf_counter()
+        result = self._obj(*args, **kwargs)  # Repassa a chamada para o objeto base
+        self.total_time += time.perf_counter() - start
+        return result
 
 
 def run(args):
@@ -25,8 +55,15 @@ def run(args):
     absscale = AbsoluteScaleComputer()
 
     loader = create_dataloader(config["dataset"])
-    detector = create_detector(config["detector"])
-    matcher = create_matcher(config["matcher"])
+    
+    # Criamos os objetos base
+    base_detector = create_detector(config["detector"])
+    base_matcher = create_matcher(config["matcher"])
+    
+    # Envolvemos com a classe que mede o tempo
+    detector = ProfilingWrapper(base_detector)
+    matcher = ProfilingWrapper(base_matcher)
+    
     pnp_config = config['pnp']
 
     vo = VisualOdometry(
@@ -42,7 +79,6 @@ def run(args):
         ba_config = config.get("ba", {})
         print(ba_config)
         ba_obj = GTSAMBundleAdjuster(loader.cam, ba_config)
-        # Avisa ao VO que deve manter observações e chamar add_observation
         vo.set_ba_active(True)
 
     # Robot and KAIST datasets often have different axis conventions
@@ -74,14 +110,20 @@ def run(args):
     if args.rtsp:
         rtsp_handler = RSTPHandler(config)
 
+    frames_processados = 0
+
     # Main loop
     for i, img in enumerate(loader):
+        # LIMITADOR DE FRAMES (AMOSTRAGEM)
+        if args.max_frames > 0 and i >= args.max_frames:
+            print(f"\n[INFO] Limite de {args.max_frames} frames atingido. Encerrando amostragem...")
+            break
+            
+        frames_processados += 1
         gt_pose = loader.get_cur_pose()
 
         # Correcting the order of gt_pose for robot datasets
-        # Guarda a translação original para evitar sobrescritas durante as trocas
         t_gt_orig = gt_pose[:3, 3].copy()
-        # Altera apenas a coluna de translação, preservando a matriz de rotação
         if is_cusco:
             gt_pose[0, 3] = t_gt_orig[2]
             gt_pose[1, 3] = 0
@@ -104,7 +146,6 @@ def run(args):
                 prev_timestamp=timestamp_prev,
                 cur_timestamp=timestamp
             )
-            # x and z are inverted in kaist dataset
             if is_kaist:
                 t_wo[0, 0] = (t_wo_raw[1]).item()
                 t_wo[1, 0] = 0
@@ -125,7 +166,6 @@ def run(args):
             wo_pose[:3, :3] = R_wo
             wo_pose[:3, 3] = t_wo.flatten()
 
-        #current_scale = absscale.update(gt_pose)
         if is_cusco:
             current_scale = 0.01
         else:
@@ -134,7 +174,7 @@ def run(args):
         # Update Visual Odometry
         R_vo, t_vo, rel_t_vo, rel_r_vo = vo.update(img, current_scale)
 
-        # Bundle Adjustment (só quando --ba foi passado)
+        # Bundle Adjustment
         ba_xyz = None
         if ba_obj and rel_t_vo is not None and rel_r_vo is not None:
             try:
@@ -175,12 +215,63 @@ def run(args):
         if cv2.waitKey(10) == 27:
             break
 
-    # Usa a variável de sufixo para nomear a imagem também 
-    output_image = f"results/{fname}{suffix}.png"
-    cv2.imwrite(output_image, img2)
-
+    # Identificação externa do Extrator e Matcher obtida das configurações
     detector_name = config["detector"].get("type", config["detector"].get("name", "unknown"))
     matcher_name = config["matcher"].get("type", config["matcher"].get("name", "unknown"))
+
+    # ==============================================================================
+    # PRINT DOS RESULTADOS DE TEMPO & SALVAMENTO EM LOG (CSV)
+    # ==============================================================================
+    if frames_processados > 0:
+        avg_extract = detector.total_time / frames_processados
+        avg_match = matcher.total_time / frames_processados
+        total_sum = avg_extract + avg_match
+
+        print("\n" + "="*55)
+        print("📊 RELATÓRIO DE TEMPO MÉDIO POR FRAME (Amostragem)")
+        print("="*55)
+        print(f"🔹 Dataset/Config:          {fname}")
+        print(f"🔹 Frames Processados:      {frames_processados}")
+        print(f"🔹 Extração de Descritor:   {avg_extract:.5f} segundos")
+        print(f"🔹 Match:                   {avg_match:.5f} segundos")
+        print("-" * 55)
+        print(f"🚀 SOMA TOTAL (Ext + Match): {total_sum:.5f} segundos")
+        print("="*55 + "\n")
+
+        # Configuração do arquivo de Log
+        log_dir = "results"
+        log_file = os.path.join(log_dir, "benchmark_log.csv")
+        os.makedirs(log_dir, exist_ok=True)
+
+        # 1. Verifica se a combinação (Dataset, Detector, Matcher) já existe no arquivo
+        combination_exists = False
+        if os.path.exists(log_file) and os.path.getsize(log_file) > 0:
+            with open(log_file, "r", newline="", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                next(reader, None) # Pula o cabeçalho se houver
+                for row in reader:
+                    if len(row) >= 3:
+                        # row[0]: Dataset, row[1]: Detector, row[2]: Matcher
+                        if row[0] == fname and row[1] == detector_name and row[2] == matcher_name:
+                            combination_exists = True
+                            break
+
+        # 2. Se não existir, faz o append dos resultados
+        if not combination_exists:
+            file_is_empty = not os.path.exists(log_file) or os.path.getsize(log_file) == 0
+            with open(log_file, "a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                if file_is_empty:
+                    # Escreve o cabeçalho caso o arquivo seja novo
+                    writer.writerow(["Dataset_Config", "Detector", "Matcher", "Avg_Extract_Sec", "Avg_Match_Sec", "Total_Sum_Sec"])
+                
+                writer.writerow([fname, detector_name, matcher_name, f"{avg_extract:.5f}", f"{avg_match:.5f}", f"{total_sum:.5f}"])
+            print(f"[INFO] Nova combinação detectada! Resultados salvos em '{log_file}'")
+        else:
+            print(f"[INFO] A combinação ({fname} + {detector_name} + {matcher_name}) já consta no log. Ignorando append.")
+
+    output_image = f"results/{fname}{suffix}.png"
+    cv2.imwrite(output_image, img2)
 
     traj_plotter.save_trajectories_tum(
         config, 
@@ -216,6 +307,12 @@ if __name__ == "__main__":
         "--no-pnp",
         action="store_true",
         help="If set, PnP will be disabled and it will strictly use Essential Matrix.",
+    )
+    parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=50, 
+        help="Limita o número de frames para cálculo de amostragem de tempo (0 para rodar tudo).",
     )
 
     args = parser.parse_args()
