@@ -115,9 +115,9 @@ def run(args):
     # Main loop
     for i, img in enumerate(loader):
         # LIMITADOR DE FRAMES (AMOSTRAGEM)
-        if args.max_frames > 0 and i >= args.max_frames:
-            print(f"\n[INFO] Limite de {args.max_frames} frames atingido. Encerrando amostragem...")
-            break
+        #if args.max_frames > 0 and i >= args.max_frames:
+            #print(f"\n[INFO] Limite de {args.max_frames} frames atingido. Encerrando amostragem...")
+            #break
             
         frames_processados += 1
         gt_pose = loader.get_cur_pose()

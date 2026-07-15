@@ -8,3 +8,7 @@ data
 Datasets
 save me
 2000-simulation-nopnp-pure-odometry
+*.tum
+*.pdf
+*.zip
+*.txt

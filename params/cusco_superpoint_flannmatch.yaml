@@ -2,9 +2,9 @@ dataset:
   name: ComplexUrbanDatasetLoader
   root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/
   #root_path: test_imgs
-  sequence: cusco_dataset_1
+  sequence: cusco_dataset_2
   start: 0
-  is_robot: True
+  is_robot: true
   use_direct_position: true
   scale: 200
 
@@ -25,7 +25,7 @@ matcher:
     kdTrees: 5
     searchChecks: 50
   distance_ratio: 0.75
-  
+
 # Configurações de PnP
 pnp:
   min_3d_points: 10

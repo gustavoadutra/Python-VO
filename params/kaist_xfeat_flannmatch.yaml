@@ -1,7 +1,7 @@
 dataset:
   name: ComplexUrbanDatasetLoader
   root_path: /home/aki/Desktop/GitHub/Python-VO/Datasets/
-  sequence: 'urban27'
+  sequence: 'urban30'
   start: 0
   is_kaist: true  # Set to True for Kaist dataset, False for TUM dataset
   scale: 0.25

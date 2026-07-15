@@ -47,8 +47,10 @@ class TrajPlotter(object):
         if R is None or t is None or timestamp is None:
             return None
         
-        # Garante que a translação seja 1D
-        tx, ty, tz = float(t[0]), float(t[1]), float(t[2])
+        # Garante que a translação seja 1D, convertendo arrays numpy para escalares
+        tx = float(np.asarray(t[0]).flat[0])
+        ty = float(np.asarray(t[1]).flat[0])
+        tz = float(np.asarray(t[2]).flat[0])
         
         # Converte a matriz de rotação 3x3 para quatérnio (Scipy retorna no formato x, y, z, w por padrão)
         r_quat = R_scipy.from_matrix(R).as_quat()
@@ -117,8 +119,8 @@ class TrajPlotter(object):
                 cv2.putText(self.traj, text, (20, legend_y), cv2.FONT_HERSHEY_PLAIN, 1, self.styles[key][0], 1)
                 legend_y += 15
 
-        #if image is not None:
-            #return self._combine_image_and_trajectory(image)
+        if image is not None:
+            return self._combine_image_and_trajectory(image)
         return self.traj
 
     def _combine_image_and_trajectory(self, image):
